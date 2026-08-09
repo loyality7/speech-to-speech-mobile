@@ -1,0 +1,46 @@
+# Build directories
+build/
+bin/
+out/
+.vs/
+*.vcxproj*
+*.sln
+x64/
+Release/
+Debug/
+
+# Binaries and intermediate files
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# Ignore text notes and goal files
+*.txt
+
+# Model binaries and weights
+*.onnx
+*.gguf
+*.bin
+*.pt
+*.safetensors
+models/checkpoints/
+
+# Android & iOS build artifacts
+.gradle/
+local.properties
+*.aar
+*.xcframework
+*.ipa
+*.apk
+
+# OS artifacts
+.DS_Store
+Thumbs.db
