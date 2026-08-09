@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'S2SMobile'
-  s.version          = '1.0.0'
+  s.version          = '0.0.1'
   s.summary          = '100% On-Device Real-Time Speech-to-Speech Engine for Mobile'
   s.description      = <<-DESC
 Real-time on-device speech-to-speech engine featuring VAD, neural STT, streaming LLM inference, and natural TTS with sub-800ms conversational latency.

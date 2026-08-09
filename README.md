@@ -38,7 +38,7 @@ dependencyResolutionManagement {
 In your `build.gradle.kts`:
 ```kotlin
 dependencies {
-    implementation("com.github.loyality7:speech-to-speech-mobile:1.0.0")
+    implementation("com.github.loyality7:speech-to-speech-mobile:0.0.1")
 }
 ```
 
@@ -54,7 +54,7 @@ In Xcode:
 
 Or via **CocoaPods** in `Podfile`:
 ```ruby
-pod 'S2SMobile', :git => 'https://github.com/loyality7/speech-to-speech-mobile.git', :tag => '1.0.0'
+pod 'S2SMobile', :git => 'https://github.com/loyality7/speech-to-speech-mobile.git', :tag => '0.0.1'
 ```
 
 ---
