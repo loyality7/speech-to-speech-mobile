@@ -1,6 +1,6 @@
 # 🎙️ Speech-to-Speech Mobile
 
-[![CI & Subsystem Unit Tests](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml)
+[![CI Tests](https://img.shields.io/github/actions/workflow/status/loyality7/speech-to-speech-mobile/ci.yml?branch=main&label=CI%20Tests&style=flat)](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/loyality7/speech-to-speech-mobile?color=blue)](https://github.com/loyality7/speech-to-speech-mobile/releases)
 [![Android](https://img.shields.io/badge/Android-AAR%20%2F%20Kotlin-brightgreen.svg)]()
 [![iOS](https://img.shields.io/badge/iOS-Swift%20SPM%20%2F%20XCFramework-orange.svg)]()
