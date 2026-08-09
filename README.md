@@ -1,10 +1,10 @@
 # 🎙️ Speech-to-Speech Mobile
 
+[![CI & Subsystem Unit Tests](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/loyality7/speech-to-speech-mobile?color=blue)](https://github.com/loyality7/speech-to-speech-mobile/releases)
 [![Android](https://img.shields.io/badge/Android-AAR%20%2F%20Kotlin-brightgreen.svg)]()
 [![iOS](https://img.shields.io/badge/iOS-Swift%20SPM%20%2F%20XCFramework-orange.svg)]()
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20Core-blue.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-9%2F9%20Passed%20(100%25)-green.svg)]()
 
 A high-performance, modular, 100% local on-device Speech-to-Speech conversational engine package designed for mobile devices (Android & iOS) and edge systems.
 
