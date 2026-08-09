@@ -24,6 +24,8 @@ Debug/
 
 # Ignore text notes and goal files
 *.txt
+!CMakeLists.txt
+GOAL.txt
 
 # Model binaries and weights
 *.onnx
