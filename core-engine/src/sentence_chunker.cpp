@@ -87,6 +87,10 @@ bool SentenceChunker::isValidSentenceBoundary(const std::string& text, size_t id
     }
 
     if (c == '.') {
+        // Check for ellipsis (e.g. "...")
+        if (idx + 1 < text.size() && text[idx + 1] == '.') {
+            return false;
+        }
         // Check if abbreviation or decimal
         if (isAbbreviation(text, idx)) {
             return false;

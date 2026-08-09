@@ -88,13 +88,6 @@ float VADHandler::evaluateFrame(const std::vector<float>& frame) {
 void VADHandler::process(AudioChunk chunk) {
     if (chunk.samples.empty()) return;
 
-    // Ignore microphone input when assistant is speaking through speakers
-    if (cancelScope_ && cancelScope_->isSpeaking()) {
-        speechBuffer_.clear();
-        triggered_ = false;
-        return;
-    }
-
     // 1. Maintain rolling pre-speech ring buffer (preserves first 30ms plosives)
     for (float sample : chunk.samples) {
         preSpeechBuffer_.push_back(sample);
@@ -137,6 +130,16 @@ void VADHandler::process(AudioChunk chunk) {
         speechBuffer_.insert(speechBuffer_.end(), chunk.samples.begin(), chunk.samples.end());
         currentSpeechSamples_ += frameSamples;
 
+        // Check if utterance exceeded maximum duration (e.g. 15 seconds) to prevent unbounded memory
+        int sampleRate = config_.audio.sampleRate > 0 ? config_.audio.sampleRate : 16000;
+        int maxSpeechSamples = sampleRate * 15; // 15 seconds max chunk
+        if (currentSpeechSamples_ >= maxSpeechSamples) {
+            std::cout << "[VADHandler] Utterance reached maximum chunk size (15s). Emitting progressive segment." << std::endl;
+            finalizeUtterance(false);
+            speechBuffer_.clear();
+            currentSpeechSamples_ = 0;
+        }
+
         if (speechProb < negThreshold_) {
             // Silence frame detected (below hysteresis threshold)
             continuousSilenceSamples_ += frameSamples;
@@ -146,7 +149,6 @@ void VADHandler::process(AudioChunk chunk) {
             if (continuousSilenceSamples_ >= minSilenceSamples_) {
                 // Speech turn completed!
                 if (currentSpeechSamples_ >= minSpeechSamples_) {
-                    int sampleRate = config_.audio.sampleRate > 0 ? config_.audio.sampleRate : 16000;
                     std::cout << "[VADHandler] Utterance finished (" << currentSpeechSamples_ 
                               << " samples, " << (currentSpeechSamples_ * 1000 / sampleRate) 
                               << "ms). Emitting segment." << std::endl;
