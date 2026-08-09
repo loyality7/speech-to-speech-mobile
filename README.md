@@ -1,6 +1,6 @@
-# Speech-to-Speech Mobile (`loyality7/speech-to-speech-mobile`)
+# 🎙️ Speech-to-Speech Mobile
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub Release](https://img.shields.io/github/v/release/loyality7/speech-to-speech-mobile?color=blue)](https://github.com/loyality7/speech-to-speech-mobile/releases)
 [![Android](https://img.shields.io/badge/Android-AAR%20%2F%20Kotlin-brightgreen.svg)]()
 [![iOS](https://img.shields.io/badge/iOS-Swift%20SPM%20%2F%20XCFramework-orange.svg)]()
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20Core-blue.svg)]()
