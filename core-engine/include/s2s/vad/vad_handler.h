@@ -67,6 +67,10 @@ private:
     // Utterance accumulation buffer
     std::vector<float> speechBuffer_;
 
+    // Advanced Mobile AI Model Evaluators
+    std::unique_ptr<class SileroVAD> sileroModel_;
+    std::unique_ptr<class SmartTurnAnalyzer> smartTurnModel_;
+
     void resetState();
     void finalizeUtterance(bool isComplete);
     float evaluateFrame(const std::vector<float>& frame);

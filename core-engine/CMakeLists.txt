@@ -3,8 +3,13 @@ cmake_minimum_required(VERSION 3.18)
 add_library(s2s_core STATIC
     src/cancel_scope.cpp
     src/vad_handler.cpp
+    src/silero_vad.cpp
+    src/smart_turn.cpp
+    src/whisper_feature_extractor.cpp
+    src/whisper_decoder.cpp
     src/stt_handler.cpp
     src/chat_history.cpp
+    src/llama_engine.cpp
     src/llm_handler.cpp
     src/sentence_chunker.cpp
     src/tts_handler.cpp

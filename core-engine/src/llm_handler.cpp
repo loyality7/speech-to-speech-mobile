@@ -1,4 +1,5 @@
 #include "s2s/llm_handler.h"
+#include "s2s/llm/llama_engine.h"
 #include <iostream>
 #include <sstream>
 #include <thread>

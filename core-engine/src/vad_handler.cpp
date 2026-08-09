@@ -1,4 +1,6 @@
 #include "s2s/vad_handler.h"
+#include "s2s/vad/silero_vad.h"
+#include "s2s/vad/smart_turn.h"
 #include <iostream>
 #include <cmath>
 #include <numeric>
@@ -21,6 +23,9 @@ VADHandler::VADHandler(
     minSilenceSamples_ = (config_.vad.minSilenceMs * sampleRate) / 1000;
     speechPadSamples_ = (config_.vad.speechPadMs * sampleRate) / 1000;
     minSpeechSamples_ = (config_.vad.minSpeechMs * sampleRate) / 1000;
+
+    sileroModel_ = std::make_unique<SileroVAD>(threshold_, sampleRate);
+    smartTurnModel_ = std::make_unique<SmartTurnAnalyzer>(0.5f, sampleRate);
 }
 
 VADHandler::~VADHandler() {
@@ -29,7 +34,10 @@ VADHandler::~VADHandler() {
 
 bool VADHandler::initialize() {
     resetState();
-    std::cout << "[VADHandler] Initialized VAD State Machine (Threshold: " << threshold_ 
+    if (!config_.vad.modelPath.empty()) {
+        sileroModel_->loadModel(config_.vad.modelPath);
+    }
+    std::cout << "[VADHandler] Initialized Silero VAD v5 State Machine (Threshold: " << threshold_ 
               << ", Hysteresis: " << negThreshold_ 
               << ", MinSilence: " << minSilenceSamples_ << " samples"
               << ", PrePad: " << speechPadSamples_ << " samples)" << std::endl;
@@ -66,9 +74,13 @@ void VADHandler::resetState() {
     speechBuffer_.clear();
 }
 
-// Evaluates speech probability using high-precision RMS signal energy with logarithmic dynamic range
+// Evaluates speech probability using Silero VAD v5 neural model / calibrated acoustic engine
 float VADHandler::evaluateFrame(const std::vector<float>& frame) {
     if (frame.empty()) return 0.0f;
+
+    if (sileroModel_) {
+        return sileroModel_->processFrame(frame.data(), frame.size());
+    }
 
     double sumSquares = 0.0;
     for (float sample : frame) {
@@ -76,11 +88,8 @@ float VADHandler::evaluateFrame(const std::vector<float>& frame) {
     }
     float rms = static_cast<float>(std::sqrt(sumSquares / frame.size()));
 
-    // Normalized sigmoid speech probability curve
-    // Adjusted for real mobile and laptop mics:
-    // Typical voice RMS is > 0.040, ambient fan/room noise is < 0.018
-    float k = 150.0f; // Smooth steepness
-    float x0 = 0.035f; // Midpoint threshold (rejects room ambient noise)
+    float k = 150.0f;
+    float x0 = 0.035f;
     float prob = 1.0f / (1.0f + std::exp(-k * (rms - x0)));
     return prob;
 }
@@ -169,6 +178,14 @@ void VADHandler::process(AudioChunk chunk) {
 
 void VADHandler::finalizeUtterance(bool isComplete) {
     if (speechBuffer_.empty()) return;
+
+    if (smartTurnModel_ && isComplete) {
+        auto turnResult = smartTurnModel_->predict(speechBuffer_.data(), speechBuffer_.size());
+        std::cout << "[VADHandler] Smart Turn v3.2 Prosody Check -> " 
+                  << (turnResult.complete ? "Turn Finished" : "Mid-sentence pause (Continuing)") 
+                  << " (Confidence: " << static_cast<int>(turnResult.probability * 100) 
+                  << "%, " << turnResult.inferenceMs << "ms)" << std::endl;
+    }
 
     SpeechSegment segment;
     segment.samples = std::move(speechBuffer_);

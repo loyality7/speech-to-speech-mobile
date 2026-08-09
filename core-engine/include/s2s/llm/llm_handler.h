@@ -36,6 +36,7 @@ private:
     EngineConfig config_;
     std::shared_ptr<ChatHistory> chatHistory_;
     std::shared_ptr<ToolRegistry> toolRegistry_;
+    std::unique_ptr<class LlamaEngine> llamaEngine_;
 };
 
 } // namespace s2s
