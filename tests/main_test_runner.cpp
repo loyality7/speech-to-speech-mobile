@@ -9,6 +9,9 @@ namespace test {
     bool testSentenceChunkerSplitting();
     bool testSentenceChunkerAbbreviationExclusion();
     bool testVADSignalDetection();
+    bool testSileroAndSmartTurn();
+    bool testWhisperSubsystems();
+    bool testLlamaEngineStreaming();
     bool testToolRegistrationAndExecution();
     bool testCancelScopeBargeIn();
     bool testSafeQueueConcurrency();
@@ -45,6 +48,9 @@ int main() {
     runTest("Sentence Chunker Splitting", s2s::test::testSentenceChunkerSplitting);
     runTest("Sentence Chunker Abbreviation Protection", s2s::test::testSentenceChunkerAbbreviationExclusion);
     runTest("VAD Signal & Energy Detection", s2s::test::testVADSignalDetection);
+    runTest("Silero VAD v5 + SmartTurn v3.2 Prosody", s2s::test::testSileroAndSmartTurn);
+    runTest("Whisper STT Log-Mel Features & Decoder", s2s::test::testWhisperSubsystems);
+    runTest("LlamaEngine GGUF Streaming Generator", s2s::test::testLlamaEngineStreaming);
     runTest("Tool & Function Call Registry", s2s::test::testToolRegistrationAndExecution);
     runTest("CancelScope & Interruption Barge-In", s2s::test::testCancelScopeBargeIn);
     runTest("SafeQueue Multi-Threaded Concurrency", s2s::test::testSafeQueueConcurrency);
