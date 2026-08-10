@@ -5,6 +5,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.util.Log
 import kotlin.concurrent.thread
 
 /**
@@ -14,7 +15,7 @@ class S2SEngine {
 
     companion object {
         init {
-            System.loadLibrary("s2s_core")
+            System.loadLibrary("s2s_jni")
         }
     }
 
@@ -25,6 +26,30 @@ class S2SEngine {
     var onTranscript: ((String, Boolean) -> Unit)? = null
     var onAudioChunk: ((FloatArray) -> Unit)? = null
     var onBargeIn: (() -> Unit)? = null
+
+    var onSynthesizeTTS: ((String) -> FloatArray)? = null
+    var onTranscribeAudio: ((FloatArray) -> String)? = null
+
+    fun onNativeTranscript(text: String, isFinal: Boolean) {
+        onTranscript?.invoke(text, isFinal)
+    }
+
+    fun onNativeAudioChunk(samples: FloatArray) {
+        Log.d("S2SEngine", "onNativeAudioChunk: ${samples.size} samples, callback=${onAudioChunk != null}")
+        onAudioChunk?.invoke(samples)
+    }
+
+    fun onNativeBargeIn() {
+        onBargeIn?.invoke()
+    }
+
+    fun onNativeSynthesizeTTS(text: String): FloatArray {
+        return onSynthesizeTTS?.invoke(text) ?: floatArrayOf()
+    }
+
+    fun onNativeTranscribeAudio(samples: FloatArray): String {
+        return onTranscribeAudio?.invoke(samples) ?: ""
+    }
 
     private external fun nativeInitialize(
         vadPath: String,
@@ -37,6 +62,7 @@ class S2SEngine {
     private external fun nativeStop()
     private external fun nativeFeedAudioFloat(pcmData: FloatArray)
     private external fun nativeFeedAudioShort(pcmData: ShortArray)
+    private external fun nativeFeedTextPrompt(promptText: String)
     private external fun nativeInterrupt()
 
     fun initialize(
@@ -47,6 +73,8 @@ class S2SEngine {
     ): Boolean {
         return nativeInitialize(vadPath, sttPath, llmPath, ttsPath)
     }
+
+    var isVADActive = true
 
     fun start(): Boolean {
         if (!nativeStart()) return false
@@ -60,7 +88,7 @@ class S2SEngine {
 
         try {
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -87,7 +115,7 @@ class S2SEngine {
                 val shortBuffer = ShortArray(512)
                 while (isRecording && audioRecord != null) {
                     val read = audioRecord?.read(shortBuffer, 0, shortBuffer.size) ?: 0
-                    if (read > 0) {
+                    if (read > 0 && isVADActive) {
                         feedAudio(shortBuffer)
                     }
                 }
@@ -133,6 +161,14 @@ class S2SEngine {
             if (whisperModelPath.isNotEmpty()) {
                 com.llamatik.library.platform.WhisperBridge.initModel(whisperModelPath)
             }
+            try {
+                val methods = com.llamatik.library.platform.WhisperBridge::class.java.declaredMethods
+                for (m in methods) {
+                    Log.d("S2S_REFLECT", "WhisperBridge method: ${m.name}(${m.parameterTypes.joinToString { it.simpleName }}) -> ${m.returnType.simpleName}")
+                }
+            } catch (t: Throwable) {
+                t.printStackTrace()
+            }
             llmLoaded
         } catch (e: Throwable) {
             e.printStackTrace()
@@ -143,6 +179,8 @@ class S2SEngine {
     fun feedAudio(samples: FloatArray) = nativeFeedAudioFloat(samples)
 
     fun feedAudio(samples: ShortArray) = nativeFeedAudioShort(samples)
+
+    fun feedTextPrompt(text: String) = nativeFeedTextPrompt(text)
 
     fun interrupt() {
         try {

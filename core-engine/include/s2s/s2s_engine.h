@@ -57,6 +57,8 @@ public:
     void setTranscriptCallback(TranscriptCallback cb);
     void setAudioOutputCallback(AudioOutputCallback cb);
     void setErrorCallback(ErrorCallback cb);
+    void setTTSSynthesizeCallback(std::function<std::vector<float>(const std::string&)> cb);
+    void setSTTTranscribeCallback(std::function<std::string(const std::vector<float>&)> cb);
 
     EngineState getState() const;
     const EngineConfig& getConfig() const;

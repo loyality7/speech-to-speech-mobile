@@ -53,10 +53,10 @@ float SileroVAD::processFrame(const float* samples, size_t numSamples) {
     }
     float rms = static_cast<float>(std::sqrt(sumSquares / numSamples));
 
-    // Calibrated sigmoid probability matching Silero VAD distribution:
-    // Typical voice RMS is > 0.035, room ambient noise is < 0.015
-    float k = 140.0f;
-    float x0 = 0.032f;
+    // Calibrated sigmoid probability for mobile microphone RMS:
+    // Normal mobile speech RMS ranges 0.005 to 0.05; ambient noise < 0.003
+    float k = 300.0f;
+    float x0 = 0.008f;
     float prob = 1.0f / (1.0f + std::exp(-k * (rms - x0)));
 
     return std::max(0.0f, std::min(1.0f, prob));

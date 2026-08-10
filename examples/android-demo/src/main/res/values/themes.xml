@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.S2SMobile" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#FF0D1117</item>
+        <item name="android:navigationBarColor">#FF0D1117</item>
+        <item name="android:windowBackground">#FF0D1117</item>
+    </style>
+</resources>

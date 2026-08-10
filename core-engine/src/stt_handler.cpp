@@ -6,6 +6,15 @@
 #include <thread>
 #include <atomic>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define STT_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "S2S_STT", __VA_ARGS__)
+#define STT_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "S2S_STT", __VA_ARGS__)
+#else
+#define STT_LOGI(...)
+#define STT_LOGE(...)
+#endif
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -173,7 +182,50 @@ void setSTTMuted(bool muted) {
 }
 #endif
 
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
 namespace s2s {
+
+#ifndef _WIN32
+extern "C" {
+    struct whisper_context;
+    struct whisper_full_params {
+        int strategy;
+        int n_threads;
+        int n_max_text_ctx;
+        int offset_ms;
+        int duration_ms;
+        bool translate;
+        bool no_context;
+        bool no_timestamps;
+        bool single_segment;
+        bool print_special;
+        bool print_progress;
+        bool print_realtime;
+        bool print_timestamps;
+        const char * language;
+        bool detect_language;
+        bool suppress_blank;
+        bool suppress_non_speech_tokens;
+        float temperature;
+        float max_initial_ts;
+        float length_penalty;
+        float temperature_inc;
+        float entropy_thold;
+        float logprob_thold;
+        float no_speech_thold;
+    };
+
+    typedef struct whisper_context* (*fn_whisper_init_from_file)(const char*);
+    typedef struct whisper_full_params (*fn_whisper_full_default_params)(int);
+    typedef int (*fn_whisper_full)(struct whisper_context*, struct whisper_full_params, const float*, int);
+    typedef int (*fn_whisper_full_n_segments)(struct whisper_context*);
+    typedef const char* (*fn_whisper_full_get_segment_text)(struct whisper_context*, int);
+    typedef void (*fn_whisper_free)(struct whisper_context*);
+}
+#endif
 
 STTHandler::STTHandler(
     std::shared_ptr<SafeQueue<SpeechSegment>> queueIn,
@@ -189,12 +241,10 @@ STTHandler::STTHandler(
     g_pWinRecognizer->start([this](const std::string& text) {
         if (text.empty()) return;
         
-        // Discard recognized text if engine is currently speaking through speakers
         if (cancelScope_ && cancelScope_->isSpeaking()) {
             return;
         }
 
-        // Noise click filter: ignore spurious sub-word clicks (e.g. "The", "In", "A", "Uh", "Um", "But in")
         std::string lowerText = text;
         for (char& c : lowerText) c = static_cast<char>(std::tolower(c));
         
@@ -202,11 +252,9 @@ STTHandler::STTHandler(
             lowerText == "the" || lowerText == "in" || lowerText == "a" || 
             lowerText == "uh" || lowerText == "um" || lowerText == "but in" ||
             lowerText == "and" || lowerText == "of") {
-            // Discard noise click
             return;
         }
 
-        // Immediately mute STT while LLM generates and speaks response
         if (g_pWinRecognizer) {
             g_pWinRecognizer->setMuted(true);
         }
@@ -220,6 +268,9 @@ STTHandler::STTHandler(
 
         std::cout << "\n[STT Voice Recognized] >>> \"" << text << "\" (Gen: " << gen << ") <<<" << std::endl;
         queueOut_->push(transcript);
+        if (transcriptCb_) {
+            transcriptCb_(text, true, true);
+        }
     });
 #endif
 }
@@ -231,16 +282,24 @@ STTHandler::~STTHandler() {
         g_pWinRecognizer.reset();
     }
 #endif
-    stop();
+    cleanup();
 }
 
 bool STTHandler::initialize() {
-    std::cout << "[STTHandler] Initialized Real-Time Speech-to-Text Engine" << std::endl;
+    STT_LOGI("Initializing Speech-to-Text Engine, modelPath=%s", config_.stt.modelPath.c_str());
     return true;
 }
 
 std::string STTHandler::transcribeSegment(const std::vector<float>& samples) {
     if (samples.empty()) return "";
+    STT_LOGI("transcribeSegment called with %zu samples", samples.size());
+
+    if (transcribeCb_) {
+        std::string result = transcribeCb_(samples);
+        STT_LOGI("transcribeCb_ returned: '%s'", result.c_str());
+        return result;
+    }
+
     return "";
 }
 
@@ -268,10 +327,23 @@ void STTHandler::process(SpeechSegment segment) {
 
         std::cout << "[STTHandler] >>> Transcript: \"" << text << "\" (Gen: " << segment.generationId << ") <<<" << std::endl;
         queueOut_->push(transcript);
+
+        if (transcriptCb_) {
+            transcriptCb_(text, true, segment.isFinal);
+        }
     }
 }
 
 void STTHandler::cleanup() {
+#ifndef _WIN32
+    if (whisperCtx_) {
+        auto fn_free = (fn_whisper_free)dlsym(RTLD_DEFAULT, "whisper_free");
+        if (fn_free) {
+            fn_free((struct whisper_context*)whisperCtx_);
+        }
+        whisperCtx_ = nullptr;
+    }
+#endif
     std::cout << "[STTHandler] Cleanup completed." << std::endl;
 }
 

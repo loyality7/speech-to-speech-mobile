@@ -25,6 +25,14 @@ public:
 
     bool initialize() override;
 
+    void setTranscriptCallback(std::function<void(const std::string&, bool, bool)> cb) {
+        transcriptCb_ = std::move(cb);
+    }
+
+    void setTranscribeCallback(std::function<std::string(const std::vector<float>&)> cb) {
+        transcribeCb_ = std::move(cb);
+    }
+
     void onSessionEnd() override {}
 
 protected:
@@ -33,6 +41,9 @@ protected:
 
 private:
     EngineConfig config_;
+    std::function<void(const std::string&, bool, bool)> transcriptCb_;
+    std::function<std::string(const std::vector<float>&)> transcribeCb_;
+    void* whisperCtx_{nullptr};
     
     // Transcribe speech buffer using on-device neural STT / SAPI recognizer
     std::string transcribeSegment(const std::vector<float>& samples);

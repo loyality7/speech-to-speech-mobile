@@ -33,12 +33,18 @@ public:
     void setLanguage(const std::string& langCode);
     void setSpeed(float speed);
 
+    using TTSSynthesizeCallback = std::function<std::vector<float>(const std::string& text)>;
+    void setSynthesizeCallback(TTSSynthesizeCallback cb) {
+        synthesizeCb_ = std::move(cb);
+    }
+
 protected:
     void process(SentenceChunk sentence) override;
     void cleanup() override;
 
 private:
     EngineConfig config_;
+    TTSSynthesizeCallback synthesizeCb_;
     std::string voice_ = "af_heart";
     std::string langCode_ = "a"; // Default American English
     float speed_ = 1.0f;

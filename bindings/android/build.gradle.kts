@@ -5,7 +5,8 @@ plugins {
 
 android {
     namespace = "com.s2s.mobile"
-    compileSdk = 34
+    compileSdk = 36
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
         minSdk = 26
@@ -34,6 +35,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {

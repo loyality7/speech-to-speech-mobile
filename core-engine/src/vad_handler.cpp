@@ -6,6 +6,13 @@
 #include <numeric>
 #include <algorithm>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define VAD_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "S2S_VAD", __VA_ARGS__)
+#else
+#define VAD_LOGI(...)
+#endif
+
 namespace s2s {
 
 VADHandler::VADHandler(
@@ -17,12 +24,16 @@ VADHandler::VADHandler(
     : BaseHandler("VADHandler", queueIn, queueOut, cancelScope)
     , config_(config)
 {
-    threshold_ = config_.vad.threshold > 0.0f ? config_.vad.threshold : 0.5f;
+    threshold_ = config_.vad.threshold > 0.0f ? config_.vad.threshold : 0.35f;
     negThreshold_ = threshold_ - 0.15f; // Hysteresis threshold
     int sampleRate = config_.audio.sampleRate > 0 ? config_.audio.sampleRate : 16000;
-    minSilenceSamples_ = (config_.vad.minSilenceMs * sampleRate) / 1000;
-    speechPadSamples_ = (config_.vad.speechPadMs * sampleRate) / 1000;
-    minSpeechSamples_ = (config_.vad.minSpeechMs * sampleRate) / 1000;
+    int minSilenceMs = config_.vad.minSilenceMs > 0 ? config_.vad.minSilenceMs : 250;
+    int speechPadMs = config_.vad.speechPadMs > 0 ? config_.vad.speechPadMs : 64;
+    int minSpeechMs = (config_.vad.minSpeechMs > 0 && config_.vad.minSpeechMs <= 150) ? config_.vad.minSpeechMs : 100;
+
+    minSilenceSamples_ = (minSilenceMs * sampleRate) / 1000;
+    speechPadSamples_ = (speechPadMs * sampleRate) / 1000;
+    minSpeechSamples_ = (minSpeechMs * sampleRate) / 1000;
 
     sileroModel_ = std::make_unique<SileroVAD>(threshold_, sampleRate);
     smartTurnModel_ = std::make_unique<SmartTurnAnalyzer>(0.5f, sampleRate);
@@ -88,8 +99,8 @@ float VADHandler::evaluateFrame(const std::vector<float>& frame) {
     }
     float rms = static_cast<float>(std::sqrt(sumSquares / frame.size()));
 
-    float k = 150.0f;
-    float x0 = 0.035f;
+    float k = 300.0f;
+    float x0 = 0.008f;
     float prob = 1.0f / (1.0f + std::exp(-k * (rms - x0)));
     return prob;
 }
@@ -118,10 +129,12 @@ void VADHandler::process(AudioChunk chunk) {
             continuousSilenceSamples_ = 0;
             currentSpeechSamples_ = 0;
             speechStartTimestampMs_ = chunk.timestampMs;
+            VAD_LOGI("Speech START detected (prob=%.2f >= %.2f)", speechProb, threshold_);
 
             // Only trigger Barge-In cancellation if assistant is actively speaking!
             if (cancelScope_ && cancelScope_->isSpeaking()) {
                 cancelScope_->cancel();
+                VAD_LOGI("BARGE-IN: User interrupted assistant speech (New Gen: %u)", cancelScope_->getGeneration());
                 std::cout << "\n[VADHandler] >>> BARGE-IN: User interrupted assistant speech (New Gen: " 
                           << cancelScope_->getGeneration() << ") <<<" << std::endl;
             }
@@ -143,7 +156,7 @@ void VADHandler::process(AudioChunk chunk) {
         int sampleRate = config_.audio.sampleRate > 0 ? config_.audio.sampleRate : 16000;
         int maxSpeechSamples = sampleRate * 15; // 15 seconds max chunk
         if (currentSpeechSamples_ >= maxSpeechSamples) {
-            std::cout << "[VADHandler] Utterance reached maximum chunk size (15s). Emitting progressive segment." << std::endl;
+            VAD_LOGI("Utterance max chunk size reached (15s). Emitting progressive segment.");
             finalizeUtterance(false);
             speechBuffer_.clear();
             currentSpeechSamples_ = 0;
@@ -158,13 +171,12 @@ void VADHandler::process(AudioChunk chunk) {
             if (continuousSilenceSamples_ >= minSilenceSamples_) {
                 // Speech turn completed!
                 if (currentSpeechSamples_ >= minSpeechSamples_) {
-                    std::cout << "[VADHandler] Utterance finished (" << currentSpeechSamples_ 
-                              << " samples, " << (currentSpeechSamples_ * 1000 / sampleRate) 
-                              << "ms). Emitting segment." << std::endl;
+                    VAD_LOGI("Utterance finished (%d samples, %d ms). Emitting segment to STT.",
+                             currentSpeechSamples_, (currentSpeechSamples_ * 1000 / sampleRate));
                     finalizeUtterance(true);
                 } else {
-                    std::cout << "[VADHandler] Utterance too short (" << currentSpeechSamples_ 
-                              << " samples < " << minSpeechSamples_ << "). Dropped as noise." << std::endl;
+                    VAD_LOGI("Utterance too short (%d samples < %d). Dropped as noise.",
+                             currentSpeechSamples_, minSpeechSamples_);
                 }
                 resetState();
             }

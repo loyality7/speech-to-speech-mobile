@@ -4,6 +4,13 @@
 #include <algorithm>
 #include <numeric>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define TTS_LOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "S2S_TTS", fmt, ##__VA_ARGS__)
+#else
+#define TTS_LOG(fmt, ...) do { printf("[S2S_TTS] " fmt "\n", ##__VA_ARGS__); } while(0)
+#endif
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -183,6 +190,13 @@ std::vector<float> TTSHandler::trimSilence(const std::vector<float>& input, floa
 
 // Synthesize text using the neural model (or high quality procedural formant synthesis in simulator)
 std::vector<float> TTSHandler::synthesizeRaw(const std::string& text, const std::string& voice, float speed) {
+    if (synthesizeCb_) {
+        std::vector<float> customAudio = synthesizeCb_(text);
+        if (!customAudio.empty()) {
+            return customAudio;
+        }
+    }
+
     // Generate synthesized speech waveform at 24,000 Hz
     // Duration estimation: ~12.5 tokens/sec (~14 chars/sec)
     float estimatedDurationSec = std::max(0.4f, static_cast<float>(text.length()) / 15.0f / speed);
@@ -212,8 +226,11 @@ std::vector<float> TTSHandler::synthesizeRaw(const std::string& text, const std:
 }
 
 void TTSHandler::process(SentenceChunk sentence) {
+    TTS_LOG("process() called: text='%.80s' genId=%u", sentence.text.c_str(), sentence.generationId);
+
     // 1. Verify generation validity
     if (cancelScope_ && cancelScope_->isStale(sentence.generationId)) {
+        TTS_LOG("process() SKIPPED: genId %u is stale (current=%u)", sentence.generationId, cancelScope_->getGeneration());
 #ifdef _WIN32
         interruptSAPI();
 #endif
@@ -237,21 +254,24 @@ void TTSHandler::process(SentenceChunk sentence) {
 
     // 2. Synthesize raw 24kHz audio
     std::vector<float> raw24k = synthesizeRaw(sentence.text, voice_, speed_);
+    TTS_LOG("synthesizeRaw produced %zu samples at %dHz", raw24k.size(), nativeSampleRate_);
 
     // 3. Trim neural silence with 5ms padding (120 samples @ 24kHz)
     std::vector<float> trimmed = trimSilence(raw24k, 0.01f, 120);
+    TTS_LOG("trimSilence: %zu -> %zu samples", raw24k.size(), trimmed.size());
 
     // 4. Polyphase Resample from 24kHz to 16kHz
     int outSampleRate = config_.audio.sampleRate > 0 ? config_.audio.sampleRate : 16000;
     std::vector<float> pcm16k = resamplePoly(trimmed, nativeSampleRate_, outSampleRate);
+    TTS_LOG("resamplePoly: %zu -> %zu samples (%d->%dHz)", trimmed.size(), pcm16k.size(), nativeSampleRate_, outSampleRate);
 
     // 5. Stream in fixed 512-sample (32ms) blocks with atomic cancellation check per block
     size_t totalSamples = pcm16k.size();
+    int chunksQueued = 0;
     for (size_t i = 0; i < totalSamples; i += blockSizeSamples_) {
         // Interruption / Barge-in check on EVERY 512-sample block!
         if (cancelScope_ && cancelScope_->isStale(sentence.generationId)) {
-            std::cout << "[TTSHandler] Barge-in detected! Aborting audio playback for Gen " 
-                      << sentence.generationId << std::endl;
+            TTS_LOG("Barge-in detected at chunk %d! Aborting for Gen %u", chunksQueued, sentence.generationId);
 #ifdef _WIN32
             interruptSAPI();
 #endif
@@ -273,7 +293,9 @@ void TTSHandler::process(SentenceChunk sentence) {
         chunk.timestampMs = static_cast<int64_t>(i * 1000 / outSampleRate);
 
         queueOut_->push(chunk);
+        chunksQueued++;
     }
+    TTS_LOG("process() done: queued %d audio chunks to ttsAudioOutputQueue for genId=%u", chunksQueued, sentence.generationId);
 }
 
 void TTSHandler::cleanup() {

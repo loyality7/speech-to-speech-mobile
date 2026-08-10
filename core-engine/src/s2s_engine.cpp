@@ -1,6 +1,13 @@
 #include "s2s/s2s_engine.h"
 #include <iostream>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define S2S_LOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "S2S_ENGINE", fmt, ##__VA_ARGS__)
+#else
+#define S2S_LOG(fmt, ...) do { printf("[S2S_ENGINE] " fmt "\n", ##__VA_ARGS__); } while(0)
+#endif
+
 namespace s2s {
 
 SpeechToSpeechEngine::SpeechToSpeechEngine(const EngineConfig& config)
@@ -31,23 +38,30 @@ SpeechToSpeechEngine::~SpeechToSpeechEngine() {
 }
 
 bool SpeechToSpeechEngine::initialize() {
-    std::cout << "==================================================" << std::endl;
-    std::cout << "   Initializing 100% On-Device S2S Core Engine    " << std::endl;
-    std::cout << "==================================================" << std::endl;
+    S2S_LOG("=== Initializing S2S Core Engine ===");
 
-    if (!vadHandler_->initialize() ||
-        !sttHandler_->initialize() ||
-        !llmHandler_->initialize() ||
-        !sentenceChunker_->initialize() ||
-        !ttsHandler_->initialize()) {
+    bool vadOk = vadHandler_->initialize();
+    S2S_LOG("VADHandler init: %s", vadOk ? "OK" : "FAILED");
+    bool sttOk = sttHandler_->initialize();
+    S2S_LOG("STTHandler init: %s", sttOk ? "OK" : "FAILED");
+    bool llmOk = llmHandler_->initialize();
+    S2S_LOG("LLMHandler init: %s", llmOk ? "OK" : "FAILED");
+    bool chunkOk = sentenceChunker_->initialize();
+    S2S_LOG("SentenceChunker init: %s", chunkOk ? "OK" : "FAILED");
+    bool ttsOk = ttsHandler_->initialize();
+    S2S_LOG("TTSHandler init: %s", ttsOk ? "OK" : "FAILED");
+
+    if (!vadOk || !sttOk || !llmOk || !chunkOk || !ttsOk) {
+        S2S_LOG("FAILED to initialize one or more modules");
         if (errorCb_) errorCb_("Failed to initialize one or more engine modules.");
         return false;
     }
-    std::cout << "[S2SEngine] All 5 Pipeline Handlers successfully initialized." << std::endl;
+    S2S_LOG("All 5 Pipeline Handlers initialized successfully");
     return true;
 }
 
 bool SpeechToSpeechEngine::start() {
+    S2S_LOG("start() - restarting all queues");
     rawAudioQueue_->restart();
     vadSpeechQueue_->restart();
     sttTextQueue_->restart();
@@ -55,6 +69,7 @@ bool SpeechToSpeechEngine::start() {
     sentenceQueue_->restart();
     ttsAudioOutputQueue_->restart();
 
+    S2S_LOG("start() - launching handler threads");
     vadHandler_->start();
     sttHandler_->start();
     llmHandler_->start();
@@ -65,7 +80,7 @@ bool SpeechToSpeechEngine::start() {
     outputDispatchThread_ = std::thread(&SpeechToSpeechEngine::outputDispatchLoop, this);
 
     setState(EngineState::IDLE);
-    std::cout << "[S2SEngine] Pipeline threads running in background." << std::endl;
+    S2S_LOG("start() - all pipeline threads running, outputDispatch active, audioOutCb_ set=%d", audioOutCb_ ? 1 : 0);
     return true;
 }
 
@@ -116,16 +131,21 @@ void SpeechToSpeechEngine::feedAudioInput(const int16_t* pcmData, size_t sampleC
 }
 
 void SpeechToSpeechEngine::feedTextPrompt(const std::string& text) {
-    if (text.empty() || !sttTextQueue_) return;
+    S2S_LOG("feedTextPrompt called, text='%.80s' len=%zu sentenceQueue=%p", text.c_str(), text.size(), (void*)sentenceQueue_.get());
+    if (text.empty() || !sentenceQueue_) {
+        S2S_LOG("feedTextPrompt REJECTED (empty=%d, queue=%p)", text.empty()?1:0, (void*)sentenceQueue_.get());
+        return;
+    }
 
-    STTTranscript transcript;
-    transcript.text = text;
-    transcript.detectedLanguage = "en";
-    transcript.isFinal = true;
-    transcript.generationId = cancelScope_ ? cancelScope_->getGeneration() : 0;
+    SentenceChunk chunk;
+    chunk.text = text;
+    chunk.isFinal = true;
+    chunk.generationId = cancelScope_ ? cancelScope_->getGeneration() : 0;
 
-    setState(EngineState::GENERATING_RESPONSE);
-    sttTextQueue_->push(std::move(transcript));
+    S2S_LOG("feedTextPrompt pushing SentenceChunk genId=%u to sentenceQueue", chunk.generationId);
+    setState(EngineState::SPEAKING);
+    sentenceQueue_->push(std::move(chunk));
+    S2S_LOG("feedTextPrompt push complete");
 }
 
 void SpeechToSpeechEngine::interrupt() {
@@ -172,9 +192,24 @@ void SpeechToSpeechEngine::registerTool(const ToolDefinition& def, ToolFunction 
 }
 
 void SpeechToSpeechEngine::setStateCallback(StateCallback cb) { stateCb_ = std::move(cb); }
-void SpeechToSpeechEngine::setTranscriptCallback(TranscriptCallback cb) { transcriptCb_ = std::move(cb); }
+void SpeechToSpeechEngine::setTranscriptCallback(TranscriptCallback cb) {
+    transcriptCb_ = cb;
+    if (sttHandler_) {
+        sttHandler_->setTranscriptCallback(cb);
+    }
+}
 void SpeechToSpeechEngine::setAudioOutputCallback(AudioOutputCallback cb) { audioOutCb_ = std::move(cb); }
 void SpeechToSpeechEngine::setErrorCallback(ErrorCallback cb) { errorCb_ = std::move(cb); }
+void SpeechToSpeechEngine::setTTSSynthesizeCallback(std::function<std::vector<float>(const std::string&)> cb) {
+    if (ttsHandler_) {
+        ttsHandler_->setSynthesizeCallback(std::move(cb));
+    }
+}
+void SpeechToSpeechEngine::setSTTTranscribeCallback(std::function<std::string(const std::vector<float>&)> cb) {
+    if (sttHandler_) {
+        sttHandler_->setTranscribeCallback(std::move(cb));
+    }
+}
 
 EngineState SpeechToSpeechEngine::getState() const { return state_.load(); }
 const EngineConfig& SpeechToSpeechEngine::getConfig() const { return config_; }
@@ -187,18 +222,29 @@ void SpeechToSpeechEngine::setState(EngineState newState) {
 }
 
 void SpeechToSpeechEngine::outputDispatchLoop() {
+    S2S_LOG("outputDispatchLoop STARTED, audioOutCb_ set=%d", audioOutCb_ ? 1 : 0);
+    int dispatchCount = 0;
     while (isDispatching_) {
         auto audioChunkOpt = ttsAudioOutputQueue_->popWithTimeout(50);
         if (audioChunkOpt.has_value()) {
             auto& chunk = audioChunkOpt.value();
-            if (!cancelScope_->isStale(chunk.generationId)) {
+            bool stale = cancelScope_->isStale(chunk.generationId);
+            S2S_LOG("outputDispatch: got chunk #%d, %zu samples, genId=%u, stale=%d, hasCb=%d",
+                    ++dispatchCount, chunk.samples.size(), chunk.generationId, stale?1:0, audioOutCb_?1:0);
+            if (!stale) {
                 setState(EngineState::SPEAKING);
                 if (audioOutCb_) {
                     audioOutCb_(chunk.samples, chunk.generationId);
+                } else {
+                    S2S_LOG("outputDispatch: NO audioOutCb_ registered! Audio lost!");
                 }
+            } else {
+                S2S_LOG("outputDispatch: chunk DROPPED (stale genId=%u, current=%u)",
+                        chunk.generationId, cancelScope_->getGeneration());
             }
         }
     }
+    S2S_LOG("outputDispatchLoop EXITED");
 }
 
 } // namespace s2s
