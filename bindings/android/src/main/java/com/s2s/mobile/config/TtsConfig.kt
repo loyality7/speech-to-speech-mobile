@@ -44,7 +44,7 @@ data class TtsConfig(
      * chunks; too low and prosody suffers, because the model needs a phrase to
      * shape intonation across.
      */
-    val maxChunkChars: Int = 70,
+    val maxChunkChars: Int = 120,
     /**
      * Pick the voice from the language the recogniser reports, where the bundle
      * offers more than one language.

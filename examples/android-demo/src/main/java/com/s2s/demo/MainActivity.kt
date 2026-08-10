@@ -17,6 +17,10 @@ import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
 import com.s2s.mobile.config.ModelPaths
 import com.s2s.mobile.config.S2SConfig
+import com.s2s.mobile.config.SttBackend
+import com.s2s.mobile.config.SttConfig
+import com.s2s.mobile.config.TtsConfig
+import com.s2s.mobile.pipeline.TtsBackend
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -165,6 +169,14 @@ class MainActivity : Activity() {
                             llmModel = File(modelsDir(), LLM).absolutePath,
                             ttsDir = File(modelsDir(), TTS).absolutePath,
                         ),
+                        // Piper synthesises many times faster than Kokoro on a
+                        // mid-range phone, which is what keeps speech continuous
+                        // rather than arriving in chunks with gaps between them.
+                        // Moonshine is far more accurate than the streaming
+                        // recogniser on short conversational turns. It cannot
+                        // stream, so its decode lands in the response path.
+                        stt = SttConfig(backend = SttBackend.MOONSHINE),
+                        tts = TtsConfig(backend = TtsBackend.VITS),
                     ),
                 ).also { created ->
                     engine = created

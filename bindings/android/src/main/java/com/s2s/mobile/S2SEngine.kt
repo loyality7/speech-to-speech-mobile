@@ -20,6 +20,7 @@ import com.s2s.mobile.pipeline.ToolFunction
 import com.s2s.mobile.pipeline.Tools
 import com.s2s.mobile.pipeline.Transcript
 import com.s2s.mobile.pipeline.VoiceActivityDetector
+import com.s2s.mobile.stt.OfflineVadRecognizer
 import com.s2s.mobile.stt.SherpaStreamingRecognizer
 import com.s2s.mobile.text.SentenceChunker
 import com.s2s.mobile.tools.ToolRegistry
@@ -32,6 +33,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executors
+
+/**
+ * Picks the recogniser implementation the configured backend requires.
+ *
+ * Streaming and offline models need fundamentally different drivers — one is fed
+ * frame by frame and reports its own endpoints, the other needs speech segmented
+ * for it — so the backend choice selects the driver rather than a flag inside one.
+ */
+private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
+    if (config.stt.backend.streaming) {
+        SherpaStreamingRecognizer(config.stt, config.audio, config.models.sttDir)
+    } else {
+        OfflineVadRecognizer(
+            sttConfig = config.stt,
+            vadConfig = config.vad,
+            audioConfig = config.audio,
+            modelDir = config.models.sttDir,
+            vadModelPath = config.models.vadModel,
+        )
+    }
 
 /**
  * Fully on-device speech-to-speech engine.
@@ -57,8 +78,7 @@ class S2SEngine(
     private val context: Context,
     private val config: S2SConfig,
     private val vad: VoiceActivityDetector = SileroVad(config.vad, config.audio, config.models.vadModel),
-    private val recognizer: SpeechRecognizer =
-        SherpaStreamingRecognizer(config.stt, config.audio, config.models.sttDir),
+    private val recognizer: SpeechRecognizer = defaultRecognizer(config),
     private val languageModel: LanguageModel = LlamaLanguageModel(config.llm, config.models.llmModel),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
     private val microphone: AudioInput = MicrophoneInput(config.audio),

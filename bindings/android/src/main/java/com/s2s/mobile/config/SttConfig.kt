@@ -1,18 +1,40 @@
 package com.s2s.mobile.config
 
-/** Streaming model families the sherpa-onnx online recogniser can host. */
-enum class SttBackend {
+/**
+ * Recognition backends.
+ *
+ * Streaming models decode while the user is still talking, so the transcript
+ * costs nothing extra once they stop. Offline models are more accurate but only
+ * see a complete utterance, so their decode time lands squarely in the response
+ * path — the VAD segments speech and the whole segment is transcribed at once.
+ */
+enum class SttBackend(val streaming: Boolean) {
     /** Streaming Zipformer transducer. Best accuracy-per-millisecond on ARM. */
-    ZIPFORMER_TRANSDUCER,
+    ZIPFORMER_TRANSDUCER(streaming = true),
 
     /** Streaming Zipformer2 CTC. Smaller, slightly worse on rare words. */
-    ZIPFORMER2_CTC,
+    ZIPFORMER2_CTC(streaming = true),
 
-    /** Streaming Paraformer. Strong on Chinese. */
-    PARAFORMER,
+    /** Streaming Paraformer. Strong on Chinese. Matches the Python `paraformer`. */
+    PARAFORMER(streaming = true),
 
     /** Streaming NeMo CTC. */
-    NEMO_CTC,
+    NEMO_CTC(streaming = true),
+
+    /**
+     * Moonshine. Built for edge devices and notably strong on short utterances,
+     * which is most of a conversation. Roughly 100–250 MB.
+     */
+    MOONSHINE(streaming = false),
+
+    /**
+     * NeMo Parakeet-TDT. The most accurate option here and multilingual, but
+     * ~490 MB and the slowest to decode. Matches the Python `parakeet-tdt`.
+     */
+    PARAKEET_TDT(streaming = false),
+
+    /** Whisper. Widely understood baseline; slower than Moonshine at equal size. */
+    WHISPER(streaming = false),
 }
 
 /**

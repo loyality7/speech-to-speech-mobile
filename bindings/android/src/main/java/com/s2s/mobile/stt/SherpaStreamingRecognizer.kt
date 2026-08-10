@@ -90,6 +90,8 @@ class SherpaStreamingRecognizer(
                 numThreads = sttConfig.numThreads,
                 provider = "cpu",
             )
+
+            else -> error("${sttConfig.backend} is an offline backend; use OfflineVadRecognizer")
         }
 
         // Hotwords need modified_beam_search; greedy search ignores them.

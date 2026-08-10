@@ -86,12 +86,22 @@ class SherpaSynthesizer(
             }
         }
 
+        val started = System.currentTimeMillis()
         try {
-            engine.generateWithCallback(
+            val audio = engine.generateWithCallback(
                 text = text,
                 sid = currentVoice,
                 speed = config.speed,
                 callback = callback,
+            )
+            // Real-time factor: synthesis time over audio produced. Above 1.0 the
+            // synthesiser cannot keep up with playback and speech will stutter.
+            val elapsed = System.currentTimeMillis() - started
+            val audioMs = audio.samples.size * 1000L / maxOf(1, sampleRate)
+            Log.i(
+                TAG,
+                "synth ${elapsed}ms for ${audioMs}ms audio (RTF ${"%.2f".format(elapsed / maxOf(1.0, audioMs.toDouble()))}) " +
+                    "\"${text.take(40)}\"",
             )
         } catch (e: Throwable) {
             Log.e(TAG, "synthesis failed for \"${text.take(40)}\"", e)
