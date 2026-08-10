@@ -1,110 +1,101 @@
-# 🎙️ Speech-to-Speech Mobile
+# Speech-to-Speech Mobile
 
-[![CI Tests](https://img.shields.io/github/actions/workflow/status/loyality7/speech-to-speech-mobile/ci.yml?branch=main&label=CI%20Tests&style=flat)](https://github.com/loyality7/speech-to-speech-mobile/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/loyality7/speech-to-speech-mobile?color=blue)](https://github.com/loyality7/speech-to-speech-mobile/releases)
-[![Android](https://img.shields.io/badge/Android-AAR%20%2F%20Kotlin-brightgreen.svg)]()
-[![iOS](https://img.shields.io/badge/iOS-Swift%20SPM%20%2F%20XCFramework-orange.svg)]()
-[![C++](https://img.shields.io/badge/C%2B%2B-17%20Core-blue.svg)]()
+100% on-device speech-to-speech for Android. No cloud, no sockets — once the
+models are on disk the whole conversation runs locally, in airplane mode.
 
-A high-performance, modular, 100% local on-device Speech-to-Speech conversational engine package designed for mobile devices (Android & iOS) and edge systems.
-
-```mermaid
-flowchart LR
-    Mic["🎙️ Mic Audio (16kHz PCM)"] --> VAD["1. VAD Handler\n< 5ms frame detection"]
-    VAD --> STT["2. STT Recognizer\nReal-time transcription"]
-    STT --> LLM["3. Streaming LLM Client\nOllama / On-Device llama.cpp"]
-    LLM --> Chunker["4. Sentence Chunker\nReal-time boundary parser"]
-    Chunker --> TTS["5. TTS Synthesizer\nNatural Voice & Resampler"]
-    TTS --> Speaker["🔊 Low-Latency Output"]
-
-    VAD -. "🚨 Instant Barge-In Interruption" .-> Speaker
+```
+mic ─▶ Silero VAD ─▶ streaming ASR ─▶ llama.cpp ─▶ chunker ─▶ neural TTS ─▶ speaker
 ```
 
----
+A Kotlin port of the pipeline design in [huggingface/speech-to-speech][hf],
+built on runtimes that are already native: sherpa-onnx (ONNX Runtime) for
+VAD/ASR/TTS, and llama.cpp for generation.
 
-## 📦 Quick Installation
+[hf]: https://github.com/huggingface/speech-to-speech
 
-### 🤖 Android (Gradle / JitPack)
+## Layout
 
-In `settings.gradle.kts`:
+```
+bindings/android/          the SDK — an Android library, publishable as an AAR
+  pipeline/                stage interfaces: AudioInput/Output, SpeechRecognizer,
+                           LanguageModel, SpeechSynthesizer, TextChunker, Tools
+  config/                  per-stage configuration
+  audio/  vad/  stt/       implementations, one package per stage
+  llm/    tts/  text/
+  tools/  internal/
+examples/android-demo/     minimal harness: one button, a transcript
+```
+
+Every stage sits behind an interface, so swapping Kokoro for Piper or the
+streaming recogniser for an offline one is a constructor argument:
+
 ```kotlin
-dependencyResolutionManagement {
-    repositories {
-        maven { url = uri("https://jitpack.io") }
+val engine = S2SEngine(
+    context = this,
+    config = S2SConfig(models = ModelPaths(...)),
+    synthesizer = MyOwnSynthesizer(),   // optional override
+)
+engine.initialize().getOrThrow()        // slow, call off the main thread
+engine.start()
+
+lifecycleScope.launch {
+    engine.events.collect { event ->
+        when (event) {
+            is S2SEvent.UserTranscript -> ...
+            is S2SEvent.AssistantDelta -> ...
+            is S2SEvent.Metrics -> ...
+            else -> Unit
+        }
     }
 }
 ```
 
-In your `build.gradle.kts`:
-```kotlin
-dependencies {
-    implementation("com.github.loyality7:speech-to-speech-mobile:0.0.1")
-}
+`RECORD_AUDIO` must be granted before `start()`.
+
+## Backends
+
+| Stage | Implementation | Alternatives available |
+|-------|----------------|------------------------|
+| VAD   | Silero VAD v5 (ONNX) | — |
+| STT   | Streaming Zipformer transducer | Zipformer2-CTC, Paraformer, NeMo-CTC |
+| LLM   | llama.cpp via Llamatik, any GGUF | — |
+| TTS   | Kokoro-82M, 24 kHz | VITS/Piper, Matcha, Kitten, Pocket |
+
+Kokoro and Pocket match the `kokoro` and `pocket` backends in the Python
+pipeline; Paraformer matches `paraformer`.
+
+## Building
+
+```bash
+./gradlew :examples:android-demo:assembleDebug
+adb install -r examples/android-demo/build/outputs/apk/debug/android-demo-debug.apk
 ```
 
-### 🍎 iOS (Swift Package Manager)
+The sherpa-onnx AAR is downloaded automatically on first build (~48 MB); it is
+not committed because k2-fsa publishes no Maven artifact.
 
-In Xcode:
-1. Go to **File** $\rightarrow$ **Add Packages...**
-2. Enter repository URL:
-   ```text
-   https://github.com/loyality7/speech-to-speech-mobile
-   ```
-3. Add **`S2SMobile`** to your target.
+The demo downloads its models on first run into
+`Android/data/com.s2s.demo/files/models/`. To side-load them instead:
 
-Or via **CocoaPods** in `Podfile`:
-```ruby
-pod 'S2SMobile', :git => 'https://github.com/loyality7/speech-to-speech-mobile.git', :tag => '0.0.1'
+```
+models/silero_vad.onnx      Silero VAD v5
+models/stt/                 extracted sherpa streaming ASR bundle
+models/tts/                 extracted sherpa TTS bundle
+models/model.gguf           any instruct-tuned GGUF
 ```
 
----
+## Latency
 
-## 🚀 Quick Usage
+Measured per turn from the end of the user's speech and logged as
+`turn latency: first token Xms, first audio Yms`.
 
-### Kotlin (Android)
-```kotlin
-import com.s2s.mobile.S2SEngine
+Recognition runs *while* the user is speaking, so the transcript is already
+decoded when the endpointer fires — there is no transcription wait in the
+response path. Generation is chunked at clause boundaries so the first phrase is
+synthesised while the rest is still being written.
 
-val engine = S2SEngine()
-engine.initialize(
-    vadPath = "assets/silero_vad.onnx",
-    sttPath = "assets/whisper-tiny.onnx",
-    llmPath = "assets/minicpm-v4.6.gguf",
-    ttsPath = "assets/kokoro-v0_19.onnx"
-)
-engine.start()
+## Tests
 
-// In your audio recording loop:
-engine.feedAudio(shortBuffer)
-
-// Interruption / Barge-in:
-engine.interrupt()
+```bash
+./gradlew :bindings:android:testDebugUnitTest
 ```
-
-### Swift (iOS)
-```swift
-import S2SMobile
-
-let engine = S2SEngine()
-_ = engine.initialize(vadPath: vad, sttPath: stt, llmPath: llm, ttsPath: tts)
-_ = engine.start()
-
-// Feed PCM samples from AVAudioEngine:
-engine.feedAudio(pcmSamples: samples)
-
-// Interruption / Barge-in:
-engine.interrupt()
-```
-
----
-
-## 🧪 Running Unit Tests
-
-```powershell
-cd speech-to-speech-mobile
-cmake -B build -S .
-cmake --build build --config Release
-.\build\tests\Release\s2s_tests.exe
-```
-
-All 9 subsystem unit test suites pass with 100% test coverage.
