@@ -13,6 +13,13 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+
+        ndk {
+            // ponytail: arm64 only. The sherpa and llamatik AARs ship four ABIs and
+            // the other three are dead weight on any modern phone. Add them back
+            // when a release actually needs 32-bit or emulator support.
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
