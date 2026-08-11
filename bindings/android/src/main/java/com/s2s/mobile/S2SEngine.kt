@@ -118,6 +118,9 @@ class S2SEngine(
     /** When the assistant last started talking, for the barge-in grace window. */
     @Volatile private var speakingSince = 0L
 
+    /** Set by any thread; applied by the audio thread, which owns those objects. */
+    @Volatile private var resetRecognitionPending = false
+
     /** Voices the loaded TTS bundle exposes. Empty until [initialize] succeeds. */
     val voices get() = synthesizer.voices
 
@@ -126,8 +129,15 @@ class S2SEngine(
 
     // ── Lifecycle ───────────────────────────────────────────────────────
 
-    /** Loads every model. Takes seconds — never call this on the main thread. */
+    /**
+     * Loads every model. Takes seconds — never call this on the main thread.
+     *
+     * Idempotent: calling it again on a running engine would load a second copy of
+     * every model and drop the first set unreleased, which on a ~490 MB GGUF
+     * exhausts a mid-range device within a few restarts.
+     */
     fun initialize(): Result<Unit> = runCatching {
+        if (initialized) return@runCatching Unit
         vad.initialize().getOrThrow()
         recognizer.initialize().getOrThrow()
         synthesizer.initialize().getOrThrow()
@@ -140,6 +150,9 @@ class S2SEngine(
         Unit
     }.onFailure {
         Log.e(TAG, "initialize failed", it)
+        // A partial load still holds native memory; free whatever came up before
+        // the failure so a retry does not stack a second set of models on top.
+        releaseStages()
         emit(S2SEvent.Error("Initialisation failed: ${it.message}", it))
     }
 
@@ -181,10 +194,20 @@ class S2SEngine(
         stop()
         llmWorker.shutdownNow()
         ttsWorker.shutdownNow()
-        recognizer.release()
-        vad.release()
-        synthesizer.release()
-        languageModel.release()
+        releaseStages()
+    }
+
+    /**
+     * Frees native handles. Safe to call on a partially initialised engine, and
+     * only after [stop] has joined the audio thread — these objects are not
+     * thread-safe and that thread reads them every frame.
+     */
+    private fun releaseStages() {
+        runCatching { recognizer.release() }.onFailure { Log.w(TAG, "recognizer release", it) }
+        runCatching { vad.release() }.onFailure { Log.w(TAG, "vad release", it) }
+        runCatching { synthesizer.release() }.onFailure { Log.w(TAG, "synthesizer release", it) }
+        runCatching { languageModel.release() }.onFailure { Log.w(TAG, "llm release", it) }
+        speaker = null
         initialized = false
     }
 
@@ -202,8 +225,10 @@ class S2SEngine(
         speaker?.flush()
         chunker.reset()
         synthesisDone = true
-        recognizer.reset()
-        vad.reset()
+        // The recogniser and VAD are owned by the audio thread — sherpa's stream
+        // objects are not thread-safe, and resetting one here would free it while
+        // that thread is decoding into it. Ask, do not touch.
+        resetRecognitionPending = true
         if (running) setState(S2SState.LISTENING)
     }
 
@@ -233,6 +258,14 @@ class S2SEngine(
 
     private fun onFrame(frame: FloatArray) {
         if (!running) return
+
+        // Applied here because this thread owns the recogniser and VAD.
+        if (resetRecognitionPending) {
+            resetRecognitionPending = false
+            recognizer.reset()
+            vad.reset()
+        }
+
         when (_state.value) {
             S2SState.LISTENING -> when (val heard = recognizer.accept(frame)) {
                 is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))

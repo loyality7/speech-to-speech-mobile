@@ -18,6 +18,10 @@ import com.s2s.mobile.config.VadConfig
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.Transcript
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Offline recognition over VAD-segmented speech, for models that cannot stream:
@@ -42,6 +46,11 @@ class OfflineVadRecognizer(
 
     private var vad: Vad? = null
     private var recognizer: OfflineRecognizer? = null
+
+    /** Serial so utterances are transcribed in the order they were spoken. */
+    private val decoder = Executors.newSingleThreadExecutor { r -> Thread(r, "S2S-Decode") }
+    private val decoded = ConcurrentLinkedQueue<String>()
+    private val decodeGeneration = AtomicInteger(0)
 
     override fun initialize(): Result<Unit> = runCatching {
         val dir = File(modelDir)
@@ -119,40 +128,76 @@ class OfflineVadRecognizer(
         Unit
     }.onFailure { Log.e(TAG, "initialize failed", it) }
 
+    /**
+     * Never blocks. Segmentation is cheap and stays here; decoding is handed to a
+     * worker and the result is picked up by a later frame.
+     *
+     * Decoding inline would stall audio capture for the length of the decode
+     * (160–650 ms measured), which drops frames and leaves the capture thread
+     * un-joinable during shutdown.
+     */
     override fun accept(frame: FloatArray): Transcript {
         val detector = vad ?: return Transcript.Nothing
-        val rec = recognizer ?: return Transcript.Nothing
 
         detector.acceptWaveform(frame)
-        if (detector.empty()) return Transcript.Nothing
+        while (!detector.empty()) {
+            // A segment only appears once the VAD has seen the trailing silence,
+            // so each one is already a complete utterance.
+            val segment = detector.front()
+            detector.pop()
+            val generation = decodeGeneration.get()
+            decoder.execute { decode(segment.samples, generation) }
+        }
 
-        // A segment is only produced once the VAD has seen the trailing silence,
-        // so anything here is a complete utterance.
-        val segment = detector.front()
-        detector.pop()
+        // At most one frame (32 ms) later than an inline decode would have been.
+        return decoded.poll()?.let { Transcript.Final(it) } ?: Transcript.Nothing
+    }
+
+    private fun decode(samples: FloatArray, generation: Int) {
+        val rec = recognizer ?: return
+        // Dropped if the turn was reset while this sat in the queue.
+        if (generation != decodeGeneration.get()) return
 
         val started = System.currentTimeMillis()
         val stream = rec.createStream()
         val text = try {
-            stream.acceptWaveform(segment.samples, audioConfig.sampleRate)
+            stream.acceptWaveform(samples, audioConfig.sampleRate)
             rec.decode(stream)
             rec.getResult(stream).text.trim()
+        } catch (e: Throwable) {
+            Log.e(TAG, "decode failed", e)
+            ""
         } finally {
             stream.release()
         }
 
-        val audioMs = segment.samples.size * 1000L / audioConfig.sampleRate
+        val audioMs = samples.size * 1000L / audioConfig.sampleRate
         Log.i(TAG, "decoded ${audioMs}ms of speech in ${System.currentTimeMillis() - started}ms")
 
-        return if (text.isEmpty()) Transcript.Nothing else Transcript.Final(text)
+        if (text.isNotEmpty() && generation == decodeGeneration.get()) decoded.offer(text)
     }
 
     override fun reset() {
+        // Invalidates queued and in-flight decodes so a cancelled utterance cannot
+        // surface as a transcript after the fact.
+        decodeGeneration.incrementAndGet()
+        decoded.clear()
         vad?.reset()
         vad?.clear()
     }
 
+    /**
+     * Shuts the decoder down before freeing native handles — a decode in flight
+     * holds the recogniser, and releasing underneath it would be a use-after-free.
+     */
     override fun release() {
+        decodeGeneration.incrementAndGet()
+        decoder.shutdown()
+        if (!decoder.awaitTermination(5, TimeUnit.SECONDS)) {
+            Log.w(TAG, "decoder did not finish; leaking native handles rather than freeing them in use")
+            return
+        }
+        decoded.clear()
         vad?.release(); vad = null
         recognizer?.release(); recognizer = null
     }

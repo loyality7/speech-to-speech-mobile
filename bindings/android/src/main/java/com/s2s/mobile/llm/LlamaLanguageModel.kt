@@ -54,10 +54,29 @@ class LlamaLanguageModel(
             return
         }
         try {
+            val entered = System.currentTimeMillis()
+            val prompt = buildPrompt(messages)
+            val built = System.currentTimeMillis()
+            var first = true
+
             LlamaBridge.generateStream(
-                prompt = buildPrompt(messages),
+                prompt = prompt,
                 callback = object : GenStream {
-                    override fun onDelta(text: String) = sink.onToken(text)
+                    override fun onDelta(text: String) {
+                        if (first) {
+                            first = false
+                            // Separates prompt building from prefill: if the gap is
+                            // in prefill the fix is KV reuse across turns, if it is
+                            // before the call it is scheduling or contention.
+                            Log.i(
+                                TAG,
+                                "prompt ${prompt.length} chars, built in ${built - entered}ms, " +
+                                    "first token ${System.currentTimeMillis() - built}ms after submit",
+                            )
+                        }
+                        sink.onToken(text)
+                    }
+
                     override fun onComplete() = sink.onComplete()
                     override fun onError(message: String) = sink.onError(message)
                 },

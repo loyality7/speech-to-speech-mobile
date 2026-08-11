@@ -114,7 +114,12 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
 
     override fun stop() {
         running = false
-        worker?.join(500)
+        // Unbounded on purpose: releasing AudioRecord while the capture thread is
+        // still inside read() is a use-after-free. The loop checks `running` every
+        // frame and read() returns within one frame period, so this is bounded in
+        // practice by the frame size — provided no frame handler blocks, which is
+        // why decoding must not happen on this thread.
+        worker?.join()
         worker = null
         aec?.release(); aec = null
         ns?.release(); ns = null
