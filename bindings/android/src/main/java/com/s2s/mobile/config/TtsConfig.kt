@@ -45,4 +45,13 @@ data class TtsConfig(
      * shape intonation across.
      */
     val maxChunkChars: Int = 120,
+    /**
+     * Shortest run of text worth a synthesis call.
+     *
+     * Each call costs a fixed 200-400 ms regardless of length, so tiny fragments
+     * — the "1." and "2." of a numbered list — run slower than real time and are
+     * heard as stutter. Measured: 631 ms of compute for 480 ms of audio. Below
+     * this length the fragment waits and is spoken with the text that follows.
+     */
+    val minChunkChars: Int = 20,
 )

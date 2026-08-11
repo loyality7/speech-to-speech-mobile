@@ -15,13 +15,13 @@ data class VadConfig(
     /**
      * Trailing silence that closes a segment, in seconds.
      *
-     * At 0.25 an ordinary mid-sentence pause ended the utterance, so a single
-     * sentence arrived as three or four fragments — "Yes." / "Oh, there we" /
-     * "Can you?" — each firing its own turn and then being barged into by the
-     * rest of the sentence. Long enough to ride over natural pauses, short
-     * enough that the end of a turn still feels immediate.
+     * This is dead time on every single turn: the user has stopped, and the
+     * engine is still waiting to be sure. It was raised to 0.7 to stop a pause
+     * mid-sentence from splitting an utterance into fragments, but continuing to
+     * speak now merges into the turn already in flight, so the split is no longer
+     * destructive and the wait can come back down.
      */
-    val minSilenceSeconds: Float = 0.7f,
+    val minSilenceSeconds: Float = 0.35f,
 
     /** Utterances shorter than this are discarded as noise, in seconds. */
     val minSpeechSeconds: Float = 0.3f,

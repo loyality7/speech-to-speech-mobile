@@ -13,7 +13,9 @@ class SentenceChunkerTest {
 
     /** Feeds text one character at a time, the way tokens really arrive. */
     private fun chunk(text: String, minChars: Int = 1000): List<String> {
-        val chunker = SentenceChunker(firstChunkMinChars = minChars)
+        // minChunkChars = 0: these cases exercise boundary detection, not the
+        // "too short to be worth synthesising" floor, which has its own test.
+        val chunker = SentenceChunker(firstChunkMinChars = minChars, minChunkChars = 0)
         val out = text.map { chunker.accept(it.toString()) }.flatten().toMutableList()
         chunker.flush()?.let { out += it }
         return out
@@ -69,14 +71,14 @@ class SentenceChunkerTest {
     fun `breaks the opening chunk early at a word boundary`() {
         // No terminal punctuation yet: the opening chunk is released at a word
         // boundary so synthesis can start instead of waiting for a full stop.
-        val chunker = SentenceChunker(firstChunkMinChars = 10)
+        val chunker = SentenceChunker(firstChunkMinChars = 10, minChunkChars = 0)
         val emitted = "Well now that is interesting and more".map { chunker.accept(it.toString()) }.flatten()
         assertEquals(listOf("Well now"), emitted)
     }
 
     @Test
     fun `prefers a clause boundary for the opening chunk`() {
-        val chunker = SentenceChunker(firstChunkMinChars = 10)
+        val chunker = SentenceChunker(firstChunkMinChars = 10, minChunkChars = 0)
         val emitted = "Well then, onwards we go".map { chunker.accept(it.toString()) }.flatten()
         assertEquals(listOf("Well then,"), emitted)
     }
@@ -85,7 +87,7 @@ class SentenceChunkerTest {
     fun `later chunks are capped so playback does not stall`() {
         // Past the opening chunk the cap still applies, otherwise the whole rest of
         // a sentence is synthesised in one call and arrives as a lump.
-        val chunker = SentenceChunker(firstChunkMinChars = 10, maxChunkChars = 20)
+        val chunker = SentenceChunker(firstChunkMinChars = 10, maxChunkChars = 20, minChunkChars = 0)
         "First one. ".forEach { chunker.accept(it.toString()) }
         val after = "then a much longer clause that keeps going".map { chunker.accept(it.toString()) }.flatten()
         assertEquals(listOf("then a much longer", "clause that keeps"), after)
@@ -93,9 +95,30 @@ class SentenceChunkerTest {
 
     @Test
     fun `a short sentence is not split by the cap`() {
-        val chunker = SentenceChunker(firstChunkMinChars = 100, maxChunkChars = 100)
+        val chunker = SentenceChunker(firstChunkMinChars = 100, maxChunkChars = 100, minChunkChars = 0)
         assertEquals(listOf("All good."), chunk("All good.", minChars = 100))
         assertEquals(emptyList<String>(), chunker.accept("short"))
+    }
+
+    @Test
+    fun `holds fragments too short to be worth a synthesis call`() {
+        // "1." and "2." cost more compute than the audio they produce, so they
+        // must ride along with the line that follows rather than be spoken alone.
+        val chunker = SentenceChunker(firstChunkMinChars = 1000, minChunkChars = 12)
+        val emitted = "Here are two. 1. Alpha is first. 2. Beta is second."
+            .map { chunker.accept(it.toString()) }.flatten().toMutableList()
+        // The final full stop is held back in case it turns into an ellipsis, so
+        // the last chunk arrives on flush.
+        chunker.flush()?.let { emitted += it }
+        assertEquals(
+            listOf("Here are two.", "1. Alpha is first.", "2. Beta is second."),
+            emitted,
+        )
+    }
+
+    @Test
+    fun `a short final fragment still gets flushed`() {
+        assertEquals(listOf("Ok."), chunk("Ok."))
     }
 
     @Test
@@ -105,7 +128,7 @@ class SentenceChunkerTest {
 
     @Test
     fun `waits for a growing ellipsis instead of cutting mid run`() {
-        val chunker = SentenceChunker(firstChunkMinChars = 1000)
+        val chunker = SentenceChunker(firstChunkMinChars = 1000, minChunkChars = 0)
         assertEquals(emptyList<String>(), chunker.accept("Hmm.."))
         assertEquals(listOf("Hmm..."), chunker.accept(". "))
     }

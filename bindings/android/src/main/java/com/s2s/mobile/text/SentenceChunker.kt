@@ -14,7 +14,8 @@ import com.s2s.mobile.pipeline.TextChunker
  */
 class SentenceChunker(
     private val firstChunkMinChars: Int = 24,
-    private val maxChunkChars: Int = 70,
+    private val maxChunkChars: Int = 120,
+    private val minChunkChars: Int = 20,
 ) : TextChunker {
 
     private val buffer = StringBuilder()
@@ -66,6 +67,16 @@ class SentenceChunker(
             // Swallow trailing quotes and brackets so they ride with the sentence.
             var cut = end + 1
             while (cut < text.length && text[cut] in CLOSERS) cut++
+
+            // Synthesis costs a fixed 200-400 ms per call whatever the length, so
+            // a fragment like the "2." of a numbered list is nearly all overhead —
+            // measured at 631 ms of compute for 480 ms of audio, which is heard as
+            // stutter. Keep scanning so it is spoken with the line that follows.
+            if (text.subSequence(0, cut).trim().length < minChunkChars &&
+                text.length < maxChunkChars
+            ) {
+                continue
+            }
             return cut
         }
 

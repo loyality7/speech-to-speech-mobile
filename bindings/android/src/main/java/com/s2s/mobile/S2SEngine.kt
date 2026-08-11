@@ -83,7 +83,7 @@ class S2SEngine(
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
     private val microphone: AudioInput = MicrophoneInput(config.audio),
     private val chunker: TextChunker =
-        SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars),
+        SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars, config.tts.minChunkChars),
     /** Register device capabilities here before [initialize] to enable tool calling. */
     val tools: Tools = ToolRegistry(),
 ) {
@@ -331,9 +331,12 @@ class S2SEngine(
 
     private fun onPlaybackDrained() {
         // Audio ran out, but the turn is only over once synthesis stopped too.
+        //
+        // Runs on the playback thread, so the recogniser and VAD are asked to
+        // reset rather than reset here — they belong to the audio thread and
+        // touching them from here throws inside sherpa mid-frame.
         if (running && synthesisDone && _state.value == S2SState.SPEAKING) {
-            recognizer.reset()
-            vad.reset()
+            resetRecognitionPending = true
             setState(S2SState.LISTENING)
         }
     }
@@ -486,8 +489,8 @@ class S2SEngine(
             if (turns.isStale(turn)) return@execute
             synthesisDone = true
             if (running && speaker?.hasPending() != true) {
-                recognizer.reset()
-                vad.reset()
+                // On the TTS worker here; the audio thread owns those objects.
+                resetRecognitionPending = true
                 setState(S2SState.LISTENING)
             }
         }

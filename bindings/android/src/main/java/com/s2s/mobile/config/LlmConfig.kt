@@ -17,7 +17,7 @@ data class LlmConfig(
     val repeatPenalty: Float = 1.1f,
     val maxTokens: Int = 256,
     val contextLength: Int = 2048,
-    val numThreads: Int = 4,
+    val numThreads: Int = 6,
     val batchSize: Int = 512,
     /** Layers offloaded to GPU. 0 keeps everything on CPU, which is safest. */
     val gpuLayers: Int = 0,
