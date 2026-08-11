@@ -121,6 +121,12 @@ class S2SEngine(
     /** Set by any thread; applied by the audio thread, which owns those objects. */
     @Volatile private var resetRecognitionPending = false
 
+    /** What the user has said so far in the turn currently being answered. */
+    @Volatile private var pendingUserText: String? = null
+
+    /** What the assistant has generated so far in the turn being answered. */
+    @Volatile private var partialReply: String = ""
+
     /** Voices the loaded TTS bundle exposes. Empty until [initialize] succeeds. */
     val voices get() = synthesizer.voices
 
@@ -218,7 +224,17 @@ class S2SEngine(
      */
     fun interrupt() {
         turns.begin()
+        pendingUserText = null
         languageModel.cancel()
+
+        // Record what was actually said before the cut. The user heard it, so the
+        // model should know it said it — and it keeps any KV cache consistent with
+        // the prompt, which is what lets the next turn reuse the cache instead of
+        // rebuilding the whole conversation.
+        partialReply.trim().takeIf { it.isNotEmpty() }?.let {
+            history.addAssistant(it)
+            partialReply = ""
+        }
         speaker?.flush()
         chunker.reset()
         synthesisDone = true
@@ -249,6 +265,7 @@ class S2SEngine(
     fun resetConversation() {
         interrupt()
         history.clear()
+        languageModel.resetContext()
     }
 
     // ── Audio in ────────────────────────────────────────────────────────
@@ -274,10 +291,20 @@ class S2SEngine(
                 Transcript.Nothing -> Unit
             }
 
-            // Assistant is thinking or talking: watch only for an interruption.
-            // The recogniser stays idle, so leaked assistant audio can never be
-            // transcribed back as if the user had said it.
-            S2SState.THINKING, S2SState.SPEAKING -> {
+            // Nothing is playing yet, so there is nothing to barge into. Keep
+            // listening: a user who pauses mid-thought and carries on is
+            // continuing the same question, not starting a new one. Treating
+            // that as an interruption threw the first half away and answered
+            // only the fragment after the pause.
+            S2SState.THINKING -> when (val heard = recognizer.accept(frame)) {
+                is Transcript.Final -> continueTurn(normalizeForModel(heard.text))
+                is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
+                Transcript.Nothing -> Unit
+            }
+
+            // Audio is playing: the recogniser stays idle so leaked assistant
+            // audio can never be transcribed back as if the user had said it.
+            S2SState.SPEAKING -> {
                 val speech = config.vad.bargeInEnabled && vad.accept(frame)
                 if (speech && System.currentTimeMillis() - speakingSince >= config.vad.bargeInGraceMs) {
                     emit(S2SEvent.BargeIn)
@@ -314,6 +341,34 @@ class S2SEngine(
     // ── Turn ────────────────────────────────────────────────────────────
 
     private fun beginTurn(userText: String) {
+        pendingUserText = userText
+        history.addUser(userText)
+        startGeneration()
+    }
+
+    /**
+     * The user paused, we started answering, and now they have carried on.
+     *
+     * Their earlier words are kept and the turn is restarted with everything
+     * they have said. Discarding the first half — which is what treating this as
+     * an interruption did — answered only the fragment after the pause.
+     */
+    private fun continueTurn(moreText: String) {
+        val merged = listOfNotNull(pendingUserText, moreText)
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (merged.isEmpty()) return
+
+        pendingUserText = merged
+        emit(S2SEvent.UserTranscript(merged, isFinal = true))
+        // Replace rather than append, or the model sees the half-question twice.
+        history.replaceLastUser(merged)
+        startGeneration()
+    }
+
+    private fun startGeneration() {
+        partialReply = ""
         val turn = turns.begin()
         languageModel.cancel()
         speaker?.flush()
@@ -324,7 +379,6 @@ class S2SEngine(
         firstTokenMs = 0
         setState(S2SState.THINKING)
 
-        history.addUser(userText)
         llmWorker.execute { generate(turn) }
     }
 
@@ -341,6 +395,7 @@ class S2SEngine(
                     if (turns.isStale(turn)) return
                     if (firstTokenMs == 0L) firstTokenMs = System.currentTimeMillis() - turnEndedAt
                     reply.append(text)
+                    partialReply = reply.toString()
                     emit(S2SEvent.AssistantDelta(text))
                     // A tool call must not be spoken aloud, and it only becomes
                     // recognisable once the object closes — so hold synthesis

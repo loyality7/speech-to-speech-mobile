@@ -24,6 +24,15 @@ interface LanguageModel {
 
     fun cancel()
 
+    /**
+     * Tells the model that the conversation was rewritten and any cached state
+     * from previous turns no longer matches the prompt it will be given.
+     *
+     * Needed because an implementation may keep a KV cache across turns; without
+     * this it would answer from text the user has since replaced.
+     */
+    fun resetContext()
+
     fun release()
 }
 

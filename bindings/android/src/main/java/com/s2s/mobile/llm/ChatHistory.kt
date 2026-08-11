@@ -26,6 +26,18 @@ class ChatHistory(
 
     fun addUser(text: String) = append(ChatMessage("user", text))
 
+    /**
+     * Replaces the most recent user message.
+     *
+     * Used when the user pauses mid-thought and carries on: the turn is restarted
+     * with the combined text, and the half-finished version must not be left
+     * behind as a separate message the model would answer twice.
+     */
+    fun replaceLastUser(text: String) = synchronized(lock) {
+        val index = turns.indexOfLast { it.role == "user" }
+        if (index >= 0) turns[index] = ChatMessage("user", text) else turns.addLast(ChatMessage("user", text))
+    }
+
     fun addAssistant(text: String) = append(ChatMessage("assistant", text))
 
     /** Records a tool result so the model can speak about what it just did. */
