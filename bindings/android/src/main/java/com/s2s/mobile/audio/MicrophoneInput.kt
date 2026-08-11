@@ -25,9 +25,6 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
     override val sampleRate: Int get() = config.sampleRate
     override val frameSize: Int get() = config.frameSize
 
-    override var echoCancellationActive: Boolean = false
-        private set
-
     private var record: AudioRecord? = null
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
@@ -72,7 +69,6 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
 
         if (config.echoCancellation && AcousticEchoCanceler.isAvailable()) {
             aec = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
-            echoCancellationActive = aec?.enabled == true
         }
         if (config.noiseSuppression && NoiseSuppressor.isAvailable()) {
             ns = NoiseSuppressor.create(rec.audioSessionId)?.apply { enabled = true }
@@ -128,7 +124,6 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
             it.release()
         }
         record = null
-        echoCancellationActive = false
     }
 
     private companion object {

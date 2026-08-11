@@ -124,9 +124,6 @@ class S2SEngine(
     /** Voices the loaded TTS bundle exposes. Empty until [initialize] succeeds. */
     val voices get() = synthesizer.voices
 
-    /** True when the platform echo canceller is active — required for barge-in. */
-    val echoCancellationActive: Boolean get() = microphone.echoCancellationActive
-
     // ── Lifecycle ───────────────────────────────────────────────────────
 
     /**

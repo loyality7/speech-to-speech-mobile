@@ -45,11 +45,4 @@ data class TtsConfig(
      * shape intonation across.
      */
     val maxChunkChars: Int = 120,
-    /**
-     * Pick the voice from the language the recogniser reports, where the bundle
-     * offers more than one language.
-     */
-    val followDetectedLanguage: Boolean = false,
-    /** Language code to voice id, used when [followDetectedLanguage] is on. */
-    val languageVoices: Map<String, Int> = emptyMap(),
 )

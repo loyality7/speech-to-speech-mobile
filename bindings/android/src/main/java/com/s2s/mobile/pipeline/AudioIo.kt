@@ -11,9 +11,6 @@ interface AudioInput {
     val sampleRate: Int
     val frameSize: Int
 
-    /** True when hardware echo cancellation is confirmed active. */
-    val echoCancellationActive: Boolean
-
     /** Begins capture. Returns false if the device or permission is unavailable. */
     fun start(onFrame: (FloatArray) -> Unit): Boolean
 

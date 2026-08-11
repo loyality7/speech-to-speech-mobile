@@ -17,12 +17,6 @@ class ChatHistory(
     systemPrompt: String,
     private val keepTurns: Int = 6,
     private val compact: Boolean = true,
-    /**
-     * Condenses turns that fall out of the window. Defaults to a cheap textual
-     * fold; supply an LLM-backed summariser for better recall. Only called when
-     * the window overflows, never on the hot path.
-     */
-    private val summarizer: (List<ChatMessage>) -> String = ::foldToSummary,
 ) {
 
     private val turns = ArrayDeque<ChatMessage>()
@@ -48,10 +42,7 @@ class ChatHistory(
             while (turns.size > max) overflow += turns.removeFirst()
             if (!compact) return
 
-            val condensed = runCatching { summarizer(overflow) }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?: return
+            val condensed = foldToSummary(overflow).takeIf { it.isNotBlank() } ?: return
             summary = summary?.let { "$it $condensed" } ?: condensed
         }
     }
