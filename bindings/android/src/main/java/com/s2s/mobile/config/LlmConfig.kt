@@ -17,7 +17,15 @@ data class LlmConfig(
     val repeatPenalty: Float = 1.1f,
     val maxTokens: Int = 256,
     val contextLength: Int = 2048,
-    val numThreads: Int = 6,
+    /**
+     * Generation threads.
+     *
+     * Raised to 6 on the reasoning that the SoC has 8 cores, and reverted: TTS
+     * synthesises concurrently on 4 more, and oversubscribing pushed mean TTS
+     * real-time factor from 0.49 to 0.62 with long chunks starting to exceed
+     * real time. The pipeline is only as fast as the stage that falls behind.
+     */
+    val numThreads: Int = 4,
     val batchSize: Int = 512,
     /** Layers offloaded to GPU. 0 keeps everything on CPU, which is safest. */
     val gpuLayers: Int = 0,

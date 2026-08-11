@@ -69,14 +69,15 @@ class SentenceChunker(
             while (cut < text.length && text[cut] in CLOSERS) cut++
 
             // Synthesis costs a fixed 200-400 ms per call whatever the length, so
-            // a fragment like the "2." of a numbered list is nearly all overhead —
-            // measured at 631 ms of compute for 480 ms of audio, which is heard as
-            // stutter. Keep scanning so it is spoken with the line that follows.
-            if (text.subSequence(0, cut).trim().length < minChunkChars &&
-                text.length < maxChunkChars
-            ) {
-                continue
-            }
+            // a fragment like the "2." of a numbered list, or a trailing
+            // "statement.", is nearly all overhead — measured at 936 ms of compute
+            // for 638 ms of audio, which is heard as stutter. Keep scanning so it
+            // is spoken with the text that follows.
+            //
+            // This holds even when the buffer is already long: cutting at the
+            // earliest boundary because there is plenty of text pending produces
+            // exactly the short fragment this is meant to prevent.
+            if (text.subSequence(0, cut).trim().length < minChunkChars) continue
             return cut
         }
 
@@ -91,9 +92,11 @@ class SentenceChunker(
         val threshold = if (emittedAny) maxChunkChars else firstChunkMinChars
         if (text.length >= threshold) {
             val clause = text.indexOfFirst { it == ',' || it == ';' || it == ':' }
-            if (clause >= 0 && clause < threshold) return clause + 1
+            if (clause >= 0 && clause < threshold && clause + 1 >= minChunkChars) return clause + 1
             val space = text.lastIndexOf(' ')
-            if (space > 0) return space + 1
+            // The floor applies here too, otherwise a cut at the last space can
+            // still hand the synthesiser a fragment too small to be worth a call.
+            if (space > 0 && space + 1 >= minChunkChars) return space + 1
         }
         return null
     }
