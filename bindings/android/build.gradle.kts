@@ -32,6 +32,7 @@ android {
     defaultConfig {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     buildTypes {
@@ -54,6 +55,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
+    // Archive extraction for bzip2 model archives
+    implementation("org.apache.commons:commons-compress:1.26.2")
+
     // sherpa-onnx: Silero VAD + streaming Zipformer STT + Kokoro TTS.
     // ponytail: local AAR — k2-fsa publishes no Maven artifact, so consumers of a
     // published S2S AAR must add this file themselves. Swap to a Maven coordinate
@@ -64,4 +68,9 @@ dependencies {
     api("com.llamatik:library:1.7.0")
 
     testImplementation("junit:junit:4.13.2")
+
+    // Android ships org.json in the platform, but android.jar's copy is a stub that
+    // throws on every call, so registry parsing would be untestable on the JVM.
+    // This is the upstream implementation Android's is derived from.
+    testImplementation("org.json:json:20240303")
 }

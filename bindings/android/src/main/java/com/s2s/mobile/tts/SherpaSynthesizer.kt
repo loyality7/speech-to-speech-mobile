@@ -148,8 +148,8 @@ class SherpaSynthesizer(
         voices = required(dir, "voices.bin"),
         tokens = required(dir, "tokens.txt"),
         dataDir = required(dir, "espeak-ng-data"),
-        // Multilingual bundles add a lexicon and a jieba dict; English-only ones do not.
-        lexicon = lexicons(dir),
+        // Multilingual bundles add lexicon files; pick lexicon-us-en.txt or first matching lexicon
+        lexicon = lexiconKokoro(dir),
         dictDir = optionalDir(dir, "dict"),
     )
 
@@ -202,35 +202,43 @@ class SherpaSynthesizer(
 
     private fun required(dir: File, name: String): String {
         val f = File(dir, name)
-        require(f.exists()) { "$name missing in ${dir.absolutePath}" }
-        return f.absolutePath
+        if (f.exists()) return f.absolutePath
+        val match = dir.walkTopDown().firstOrNull { it.isFile && it.name == name }
+        requireNotNull(match) { "$name missing in ${dir.absolutePath}" }
+        return match.absolutePath
     }
 
-    /** First .onnx whose name contains any of [needles]. */
     private fun requireModel(dir: File, vararg needles: String): String =
         needles.firstNotNullOfOrNull { pickMatching(dir, it) }
             ?: error("no ${needles.first()} .onnx in ${dir.absolutePath}")
 
-    private fun optionalDir(dir: File, name: String): String =
-        File(dir, name).takeIf { it.isDirectory }?.absolutePath ?: ""
+    private fun optionalDir(dir: File, name: String): String {
+        val f = File(dir, name)
+        if (f.isDirectory) return f.absolutePath
+        return dir.walkTopDown().firstOrNull { it.isDirectory && it.name == name }?.absolutePath ?: ""
+    }
 
-    private fun lexicons(dir: File): String =
-        dir.listFiles { f -> f.isFile && f.name.startsWith("lexicon") }
-            ?.joinToString(",") { it.absolutePath }.orEmpty()
+    private fun lexicons(dir: File): String {
+        val found = dir.walkTopDown().filter { f -> f.isFile && f.name.startsWith("lexicon") }.toList()
+        return found.joinToString(",") { it.absolutePath }
+    }
+
+    private fun lexiconKokoro(dir: File): String {
+        val us = dir.walkTopDown().firstOrNull { it.isFile && it.name == "lexicon-us-en.txt" }
+        if (us != null) return us.absolutePath
+        val found = dir.walkTopDown().filter { f -> f.isFile && f.name.startsWith("lexicon") }.toList()
+        return found.joinToString(",") { it.absolutePath }
+    }
 
     private fun pickMatching(dir: File, needle: String): String? =
-        dir.listFiles { f -> f.isFile && f.name.endsWith(".onnx") && f.name.contains(needle, true) }
-            ?.minByOrNull { it.name }?.absolutePath
+        dir.walkTopDown().filter { f -> f.isFile && f.name.endsWith(".onnx") && f.name.contains(needle, true) }
+            .minByOrNull { it.name }?.absolutePath
 
-    /**
-     * int8 weights roughly halve load time and resident memory. On a phone that
-     * matters far more than the difference in output, which is hard to hear.
-     */
     private fun pickModel(dir: File): String {
-        val onnx = dir.listFiles { f ->
+        val onnx = dir.walkTopDown().filter { f ->
             f.isFile && f.name.endsWith(".onnx") &&
                 !f.name.contains("vocos", true) && !f.name.contains("hifigan", true)
-        }?.sortedBy { it.name }.orEmpty()
+        }.sortedBy { it.name }.toList()
         require(onnx.isNotEmpty()) { "no .onnx model in ${dir.absolutePath}" }
 
         val quantised = onnx.filter { it.name.contains("int8") }
