@@ -56,9 +56,27 @@ class LlamaLanguageModel(
     @Volatile
     private var cacheTail: String? = null
 
+    /** True once this instance won the process-wide claim, so failure knows to give it back. */
+    private var claimed = false
+
     override fun initialize(): Result<Unit> = runCatching {
         val gguf = File(modelPath)
         require(gguf.isFile) { "LLM model not found: ${gguf.absolutePath}" }
+
+        // LlamaBridge is a process-wide object holding one model and one KV
+        // session, so a second live instance would silently share both: the newer
+        // model would replace the older, and either instance's sessionReset()
+        // would wipe the other's cache. The symptom is wrong answers, not a
+        // crash, so refuse it here rather than let it be debugged in the field.
+        synchronized(initLock) {
+            check(!isInstanceActive) {
+                "Another S2SEngine is already initialised in this process. " +
+                    "The llama.cpp runtime is process-global, so only one engine " +
+                    "may be live at a time — release() the first one first."
+            }
+            isInstanceActive = true
+            claimed = true
+        }
 
         LlamaBridge.updateGenerateParams(
             temperature = config.temperature,
@@ -85,7 +103,20 @@ class LlamaLanguageModel(
         }
         loaded = true
         Unit
-    }.onFailure { Log.e(TAG, "initialize failed", it) }
+    }.onFailure {
+        // Give the claim back, or a failed load bricks the process for every
+        // later attempt. Only if we took it — otherwise the rejected second
+        // instance would free the first instance's claim.
+        releaseClaim()
+        Log.e(TAG, "initialize failed", it)
+    }
+
+    private fun releaseClaim() = synchronized(initLock) {
+        if (claimed) {
+            claimed = false
+            isInstanceActive = false
+        }
+    }
 
     override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
         if (!loaded) {
@@ -177,6 +208,7 @@ class LlamaLanguageModel(
         contextDirty = false
         runCatching { LlamaBridge.shutdown() }
             .onFailure { Log.w(TAG, "shutdown failed", it) }
+        releaseClaim()
     }
 
     /**
@@ -201,5 +233,9 @@ class LlamaLanguageModel(
 
     private companion object {
         const val TAG = "S2S-Llm"
+
+        @Volatile
+        private var isInstanceActive = false
+        private val initLock = Any()
     }
 }

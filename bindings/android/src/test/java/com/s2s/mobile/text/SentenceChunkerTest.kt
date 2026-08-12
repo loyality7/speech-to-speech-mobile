@@ -122,6 +122,21 @@ class SentenceChunkerTest {
     }
 
     @Test
+    fun `first chunk may go below the floor so audio starts sooner`() {
+        // "Sure." is under minChunkChars, but it is the opening chunk: speaking it
+        // immediately is what makes the assistant feel responsive. Everything after
+        // pays the full floor, so "Ok." merges into the sentence following it.
+        val chunker = SentenceChunker(firstChunkMinChars = 4, maxChunkChars = 200, minChunkChars = 20)
+        val emitted = "Sure. Ok. That should work fine for you."
+            .map { chunker.accept(it.toString()) }.flatten().toMutableList()
+        chunker.flush()?.let { emitted += it }
+        assertEquals(
+            listOf("Sure.", "Ok. That should work fine for you."),
+            emitted,
+        )
+    }
+
+    @Test
     fun `flush returns null when empty`() {
         assertNull(SentenceChunker().flush())
     }

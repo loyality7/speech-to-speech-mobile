@@ -50,8 +50,20 @@ class SentenceChunker(
         emittedAny = false
     }
 
+    /**
+     * Shortest chunk worth a synthesis call at this point in the reply.
+     *
+     * The first chunk is allowed to be short on purpose — it sets how long the
+     * listener waits for any audio at all, and one slightly inefficient call buys
+     * that. Later chunks pay the full floor, because by then audio is already
+     * playing and a runt chunk only risks a gap.
+     */
+    private fun floor(): Int =
+        if (emittedAny) minChunkChars else minOf(firstChunkMinChars, minChunkChars)
+
     /** Index just past the end of the first complete sentence, or null. */
     private fun findCut(text: CharSequence): Int? {
+        val floor = floor()
         for (i in text.indices) {
             val c = text[i]
             if (c == '\n') return i + 1
@@ -77,7 +89,7 @@ class SentenceChunker(
             // This holds even when the buffer is already long: cutting at the
             // earliest boundary because there is plenty of text pending produces
             // exactly the short fragment this is meant to prevent.
-            if (text.subSequence(0, cut).trim().length < minChunkChars) continue
+            if (text.subSequence(0, cut).trim().length < floor) continue
             return cut
         }
 
@@ -92,11 +104,11 @@ class SentenceChunker(
         val threshold = if (emittedAny) maxChunkChars else firstChunkMinChars
         if (text.length >= threshold) {
             val clause = text.indexOfFirst { it == ',' || it == ';' || it == ':' }
-            if (clause >= 0 && clause < threshold && clause + 1 >= minChunkChars) return clause + 1
+            if (clause >= 0 && clause < threshold && clause + 1 >= floor) return clause + 1
             val space = text.lastIndexOf(' ')
             // The floor applies here too, otherwise a cut at the last space can
             // still hand the synthesiser a fragment too small to be worth a call.
-            if (space > 0 && space + 1 >= minChunkChars) return space + 1
+            if (space > 0 && space + 1 >= floor) return space + 1
         }
         return null
     }

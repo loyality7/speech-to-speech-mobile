@@ -5,12 +5,22 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
         android:label="S2S Demo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light">
+        
+        <service
+            android:name="com.s2s.mobile.model.ModelDownloadService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -20,6 +30,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TtsTestActivity"
+            android:exported="false"
+            android:label="TTS Voice Tester"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".SttTestActivity"
+            android:exported="false"
+            android:label="STT Model Tester"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>
