@@ -1,0 +1,76 @@
+speech-to-speech-mobile
+Copyright 2026 The speech-to-speech-mobile authors
+
+This product includes software developed as part of the speech-to-speech-mobile
+project, licensed under the Apache License, Version 2.0. See LICENSE.
+
+
+================================================================================
+IMPORTANT — GPL-3.0 IN DISTRIBUTED BINARIES
+================================================================================
+
+The Apache-2.0 licence above covers the source code in this repository. It does
+NOT cover the native libraries this project links against at build time, and one
+of them carries stronger obligations.
+
+sherpa-onnx ships a single native library, libsherpa-onnx-jni.so, which has
+espeak-ng statically compiled into it. espeak-ng is licensed GPL-3.0.
+
+Verified in sherpa-onnx 1.13.4, jni/arm64-v8a/libsherpa-onnx-jni.so:
+  - espeak-ng data-file names: phondata, phontab, phonindex, intonations
+  - espeak-ng runtime strings: ESPEAK_DATA_PATH, "/usr/share/espeak-ng-data",
+    "Failed to initialize espeak-ng with data dir"
+  - a literal espeak-ng source string: "Could not load the mbrola.dll file"
+
+Consequences for anyone shipping an application built on this SDK:
+
+  1. The obligation attaches to distributing the linked binary, not to whether
+     espeak-ng is called. Choosing a text-to-speech model that never invokes it
+     does not avoid this: Kokoro, Piper, Kitten and Matcha all live in the same
+     library.
+
+  2. An application that distributes libsherpa-onnx-jni.so is distributing
+     GPL-3.0 code and must satisfy GPL-3.0 for the combined work, including
+     making the corresponding source available.
+
+  3. Avoiding this requires rebuilding sherpa-onnx with
+     -DSHERPA_ONNX_ENABLE_TTS=OFF, which removes espeak-ng and all text-to-speech
+     with it, and supplying a replacement grapheme-to-phoneme stage under a
+     permissive licence.
+
+This is a summary of technical findings, not legal advice. See issue #27.
+
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+Build and runtime dependencies
+------------------------------
+sherpa-onnx 1.13.4                          Apache-2.0
+  ├── espeak-ng (compiled in)               GPL-3.0      <-- see above
+  └── ONNX Runtime (libonnxruntime.so)      MIT
+Llamatik (com.llamatik:library)             MIT
+  └── llama.cpp                             MIT
+Apache Commons Compress                     Apache-2.0
+kotlinx-coroutines                          Apache-2.0
+AndroidX Core KTX                           Apache-2.0
+
+Models
+------
+Models are NOT distributed with this SDK. They are downloaded at runtime from
+their upstream sources, and each carries its own licence, which the distributing
+application is responsible for reviewing. See
+bindings/android/src/main/resources/models_registry.json for exact URLs.
+
+  Silero VAD                                MIT
+  Kokoro TTS                                Apache-2.0
+  Qwen2.5-0.5B-Instruct                     Apache-2.0
+  Moonshine ASR                             confirm with upstream before shipping
+  Whisper                                   MIT
+  Piper voices                              Piper itself is MIT, but individual
+                                            voice datasets vary (CC0 / CC BY /
+                                            other). Confirm per voice.
+
+Entries marked "confirm" have not been verified against upstream and must be
+before any commercial distribution.
