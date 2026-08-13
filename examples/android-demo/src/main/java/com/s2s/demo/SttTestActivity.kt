@@ -2,15 +2,10 @@ package com.s2s.demo
 
 import android.Manifest
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
 import android.view.View
@@ -23,19 +18,17 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import com.s2s.mobile.S2SStages
 import com.s2s.mobile.audio.MicrophoneInput
 import com.s2s.mobile.config.AudioConfig
-import com.s2s.mobile.config.SttBackend
-import com.s2s.mobile.config.SttConfig
-import com.s2s.mobile.config.VadConfig
-import com.s2s.mobile.model.ModelDownloadService
+import com.s2s.mobile.model.ModelDownloads
+import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.ModelDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
+import com.s2s.mobile.model.S2SModels
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.Transcript
-import com.s2s.mobile.stt.OfflineVadRecognizer
-import com.s2s.mobile.stt.SherpaStreamingRecognizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,41 +54,24 @@ class SttTestActivity : Activity() {
 
     private val downloader by lazy { ModelDownloader(modelsDir()) }
 
-    private var downloadService: ModelDownloadService? = null
-    private var isBound = false
+    private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
     @Volatile private var isRecognizing = false
     private var activeMic: MicrophoneInput? = null
     private var activeRecognizer: SpeechRecognizer? = null
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as ModelDownloadService.LocalBinder
-            val s = binder.getService()
-            downloadService = s
-            isBound = true
-            observeDownloadState(s)
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            downloadService = null
-            isBound = false
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
 
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        observeDownloadState()
     }
 
-    private fun observeDownloadState(service: ModelDownloadService) {
+    private fun observeDownloadState() {
         scope.launch {
-            service.downloadState.collect { state ->
+            downloads.state.collect { state ->
                 when (state) {
-                    is ModelDownloadService.DownloadState.Progress -> {
+                    is DownloadState.Progress -> {
                         isDownloading = true
                         downloadBtn.text = "Stop Download"
                         recognizeBtn.isEnabled = false
@@ -109,21 +85,21 @@ class SttTestActivity : Activity() {
                         statusText.text = msg
                         appendLog("DOWNLOAD PROGRESS: $msg")
                     }
-                    is ModelDownloadService.DownloadState.Completed -> {
+                    is DownloadState.Completed -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         recognizeBtn.isEnabled = true
                         updateStatus()
                         appendLog("DOWNLOAD COMPLETED SUCCESSFULLY!")
                     }
-                    is ModelDownloadService.DownloadState.Error -> {
+                    is DownloadState.Error -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         recognizeBtn.isEnabled = true
                         statusText.text = "Download failed: ${state.message}"
                         appendLog("DOWNLOAD ERROR: ${state.message}")
                     }
-                    ModelDownloadService.DownloadState.Idle -> {
+                    DownloadState.Idle -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         recognizeBtn.isEnabled = true
@@ -213,7 +189,7 @@ class SttTestActivity : Activity() {
 
     private fun onDownloadOrStop() {
         if (isDownloading) {
-            downloadService?.stopDownload()
+            downloads.stop()
             statusText.text = "Stopping download…"
             return
         }
@@ -224,13 +200,7 @@ class SttTestActivity : Activity() {
             return
         }
 
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-        downloadService?.startDownload(modelsDir(), listOf(spec))
+        downloads.start(listOf(spec))
         appendLog("Triggered download for STT model: ${spec.name}")
     }
 
@@ -275,38 +245,17 @@ class SttTestActivity : Activity() {
         scope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val modelDirFile = File(modelsDir(), spec.targetPath)
-                    appendLog("Model dir path: ${modelDirFile.absolutePath}")
+                    appendLog("Model dir path: ${File(modelsDir(), spec.targetPath).absolutePath}")
 
-                    val backend = when (spec.backend) {
-                        "ZIPFORMER_TRANSDUCER" -> SttBackend.ZIPFORMER_TRANSDUCER
-                        "WHISPER" -> SttBackend.WHISPER
-                        else -> SttBackend.MOONSHINE
-                    }
-                    val sttConfig = SttConfig(
-                        backend = backend,
-                        numThreads = spec.numThreads ?: 2,
-                        decodingMethod = spec.decodingMethod ?: "modified_beam_search",
-                    )
                     val audioConfig = AudioConfig()
-                    val vadConfig = VadConfig()
-                    val sileroVadFile = File(modelsDir(), "silero_vad.onnx")
-
-                    val recognizer: SpeechRecognizer = if (backend == SttBackend.MOONSHINE || backend == SttBackend.WHISPER) {
-                        OfflineVadRecognizer(
-                            sttConfig = sttConfig,
-                            vadConfig = vadConfig,
-                            audioConfig = audioConfig,
-                            modelDir = modelDirFile.absolutePath,
-                            vadModelPath = sileroVadFile.absolutePath,
-                        )
-                    } else {
-                        SherpaStreamingRecognizer(
-                            sttConfig = sttConfig,
-                            audioConfig = audioConfig,
-                            modelDir = modelDirFile.absolutePath,
-                        )
-                    }
+                    // Same construction rules the engine uses — backend choice,
+                    // model dir and VAD path all come from the SDK, so this screen
+                    // cannot drift from what the real pipeline runs.
+                    val recognizer = S2SStages.recognizer(
+                        this@SttTestActivity,
+                        spec,
+                        audio = audioConfig,
+                    )
 
                     val initRes = recognizer.initialize()
 
@@ -363,14 +312,11 @@ class SttTestActivity : Activity() {
         setPadding(0, 8, 0, 2)
     }
 
-    private fun modelsDir() = File(getExternalFilesDir(null), "models")
+    private fun modelsDir() = S2SModels.dir(this)
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isBound) {
-            unbindService(serviceConnection)
-            isBound = false
-        }
+        downloads.close()
         isRecognizing = false
         activeMic?.stop()
         activeMic = null

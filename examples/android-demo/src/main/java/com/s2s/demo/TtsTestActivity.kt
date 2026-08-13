@@ -1,14 +1,9 @@
 package com.s2s.demo
 
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
 import android.view.View
@@ -22,13 +17,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import com.s2s.mobile.S2SStages
 import com.s2s.mobile.audio.SpeakerOutput
-import com.s2s.mobile.config.TtsConfig
-import com.s2s.mobile.model.ModelDownloadService
+import com.s2s.mobile.model.ModelDownloads
+import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.ModelDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
-import com.s2s.mobile.pipeline.TtsBackend
+import com.s2s.mobile.model.S2SModels
 import com.s2s.mobile.tts.SherpaSynthesizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,41 +54,24 @@ class TtsTestActivity : Activity() {
 
     private val downloader by lazy { ModelDownloader(modelsDir()) }
 
-    private var downloadService: ModelDownloadService? = null
-    private var isBound = false
+    private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
     @Volatile private var isSynthesizing = false
     private var activeSpeaker: SpeakerOutput? = null
     private var selectedSpeakerId = 0
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as ModelDownloadService.LocalBinder
-            val s = binder.getService()
-            downloadService = s
-            isBound = true
-            observeDownloadState(s)
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            downloadService = null
-            isBound = false
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
 
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        observeDownloadState()
     }
 
-    private fun observeDownloadState(service: ModelDownloadService) {
+    private fun observeDownloadState() {
         scope.launch {
-            service.downloadState.collect { state ->
+            downloads.state.collect { state ->
                 when (state) {
-                    is ModelDownloadService.DownloadState.Progress -> {
+                    is DownloadState.Progress -> {
                         isDownloading = true
                         downloadBtn.text = "Stop Download"
                         synthesizeBtn.isEnabled = false
@@ -106,21 +85,21 @@ class TtsTestActivity : Activity() {
                         statusText.text = msg
                         appendLog("DOWNLOAD PROGRESS: $msg")
                     }
-                    is ModelDownloadService.DownloadState.Completed -> {
+                    is DownloadState.Completed -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         synthesizeBtn.isEnabled = true
                         updateStatus()
                         appendLog("DOWNLOAD COMPLETED SUCCESSFULLY!")
                     }
-                    is ModelDownloadService.DownloadState.Error -> {
+                    is DownloadState.Error -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         synthesizeBtn.isEnabled = true
                         statusText.text = "Download failed: ${state.message}"
                         appendLog("DOWNLOAD ERROR: ${state.message}")
                     }
-                    ModelDownloadService.DownloadState.Idle -> {
+                    DownloadState.Idle -> {
                         isDownloading = false
                         downloadBtn.text = "Download Model"
                         synthesizeBtn.isEnabled = true
@@ -267,7 +246,7 @@ class TtsTestActivity : Activity() {
 
     private fun onDownloadOrStop() {
         if (isDownloading) {
-            downloadService?.stopDownload()
+            downloads.stop()
             statusText.text = "Stopping download…"
             return
         }
@@ -278,13 +257,7 @@ class TtsTestActivity : Activity() {
             return
         }
 
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-        downloadService?.startDownload(modelsDir(), listOf(spec))
+        downloads.start(listOf(spec))
         appendLog("Triggered download for model: ${spec.name}")
     }
 
@@ -329,25 +302,12 @@ class TtsTestActivity : Activity() {
         scope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val modelDirFile = File(modelsDir(), spec.targetPath)
-                    appendLog("Model dir path: ${modelDirFile.absolutePath}")
+                    appendLog("Model dir path: ${File(modelsDir(), spec.targetPath).absolutePath}")
 
-                    val backend = when (spec.backend) {
-                        "KOKORO" -> TtsBackend.KOKORO
-                        "KITTEN" -> TtsBackend.KITTEN
-                        "MATCHA" -> TtsBackend.MATCHA
-                        else -> TtsBackend.VITS
-                    }
-                    val config = TtsConfig(
-                        backend = backend,
-                        speakerId = selectedSpeakerId,
-                        numThreads = spec.numThreads ?: 2,
-                        firstChunkMinChars = spec.firstChunkMinChars ?: 8,
-                        minChunkChars = spec.minChunkChars ?: 6,
-                        speed = spec.speed ?: 1.05f,
-                    )
-
-                    val synth = SherpaSynthesizer(config, modelDirFile.absolutePath)
+                    // Built exactly the way the engine builds it. Previously this
+                    // screen used its own chunk floors (8/6 against the engine's
+                    // 10/10), so a voice could pass here and stutter in a real turn.
+                    val synth = S2SStages.synthesizer(this@TtsTestActivity, spec, selectedSpeakerId)
                     val initRes = synth.initialize()
 
                     if (initRes.isSuccess) {
@@ -412,14 +372,11 @@ class TtsTestActivity : Activity() {
         setPadding(0, 8, 0, 2)
     }
 
-    private fun modelsDir() = File(getExternalFilesDir(null), "models")
+    private fun modelsDir() = S2SModels.dir(this)
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isBound) {
-            unbindService(serviceConnection)
-            isBound = false
-        }
+        downloads.close()
         isSynthesizing = false
         activeSpeaker?.flush()
         activeSpeaker?.release()

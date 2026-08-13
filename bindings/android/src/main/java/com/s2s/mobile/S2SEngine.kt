@@ -26,12 +26,14 @@ import com.s2s.mobile.text.SentenceChunker
 import com.s2s.mobile.tools.ToolRegistry
 import com.s2s.mobile.tts.SherpaSynthesizer
 import com.s2s.mobile.vad.SileroVad
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 
 /**
@@ -133,14 +135,33 @@ class S2SEngine(
     // ── Lifecycle ───────────────────────────────────────────────────────
 
     /**
-     * Loads every model. Takes seconds — never call this on the main thread.
+     * Loads every model. Takes seconds, and always runs on [Dispatchers.IO].
+     *
+     * Suspending rather than blocking is deliberate: this reads ~800 MB from
+     * disk, and when it was an ordinary function every caller had to remember to
+     * wrap it themselves or silently ANR. The compiler now enforces what the
+     * documentation used to only ask for.
      *
      * Idempotent: calling it again on a running engine would load a second copy of
      * every model and drop the first set unreleased, which on a ~490 MB GGUF
      * exhausts a mid-range device within a few restarts.
      */
-    fun initialize(): Result<Unit> = runCatching {
-        if (initialized) return@runCatching Unit
+    suspend fun initialize(): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (initialized) return@runCatching Unit
+            loadStages()
+            Unit
+        }.onFailure {
+            Log.e(TAG, "initialize failed", it)
+            // A partial load still holds native memory; free whatever came up
+            // before the failure so a retry does not stack a second set of
+            // models on top.
+            releaseStages()
+            emit(S2SEvent.Error("Initialisation failed: ${it.message}", it))
+        }
+    }
+
+    private fun loadStages() {
         vad.initialize().getOrThrow()
         recognizer.initialize().getOrThrow()
         synthesizer.initialize().getOrThrow()
@@ -150,13 +171,6 @@ class S2SEngine(
             onDrained = { onPlaybackDrained() }
         }
         initialized = true
-        Unit
-    }.onFailure {
-        Log.e(TAG, "initialize failed", it)
-        // A partial load still holds native memory; free whatever came up before
-        // the failure so a retry does not stack a second set of models on top.
-        releaseStages()
-        emit(S2SEvent.Error("Initialisation failed: ${it.message}", it))
     }
 
     /** Opens the microphone and starts listening. */

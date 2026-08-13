@@ -39,13 +39,6 @@ class ModelDownloadService : Service() {
     /** Held so a second startDownload can be refused rather than orphaning the first. */
     private var job: Job? = null
 
-    sealed class DownloadState {
-        object Idle : DownloadState()
-        data class Progress(val progress: ModelProgress) : DownloadState()
-        object Completed : DownloadState()
-        data class Error(val message: String) : DownloadState()
-    }
-
     inner class LocalBinder : Binder() {
         fun getService(): ModelDownloadService = this@ModelDownloadService
     }
