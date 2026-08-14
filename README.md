@@ -71,8 +71,14 @@ pipeline; Paraformer matches `paraformer`.
 adb install -r examples/android-demo/build/outputs/apk/debug/android-demo-debug.apk
 ```
 
-The sherpa-onnx AAR is downloaded automatically on first build (~48 MB); it is
-not committed because k2-fsa publishes no Maven artifact.
+sherpa-onnx resolves from JitPack, which `settings.gradle.kts` declares. Anyone
+consuming this SDK needs that repository too:
+
+```kotlin
+repositories {
+    maven { url = uri("https://jitpack.io") }
+}
+```
 
 The demo downloads its models on first run into
 `Android/data/com.s2s.demo/files/models/`. To side-load them instead:
