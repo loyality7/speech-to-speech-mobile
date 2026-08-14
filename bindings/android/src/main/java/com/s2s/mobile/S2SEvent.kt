@@ -47,5 +47,18 @@ sealed interface S2SEvent {
     /** A tool the model asked for was executed. */
     data class ToolExecuted(val name: String, val output: String, val isError: Boolean) : S2SEvent
 
+    /**
+     * The engine yielded the microphone and speaker to something more important —
+     * a call, an alarm, another assistant.
+     *
+     * [willResume] true means the interruption is transient and listening resumes
+     * on its own; false means focus was lost for good and the engine has stopped.
+     * Worth reflecting in the UI, or the app looks frozen while a call rings.
+     */
+    data class AudioFocusLost(val willResume: Boolean) : S2SEvent
+
+    /** Listening resumed after a transient loss. */
+    data object AudioFocusRegained : S2SEvent
+
     data class Error(val message: String, val cause: Throwable? = null) : S2SEvent
 }

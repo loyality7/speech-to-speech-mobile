@@ -20,12 +20,23 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Capture keeps running while the app is backgrounded. Without a
+         microphone-typed foreground service Android silently stops delivering
+         audio, which reads as the assistant having gone deaf. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
     <application>
         <service
             android:name="com.s2s.mobile.model.ModelDownloadService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.s2s.mobile.audio.VoiceSessionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>
