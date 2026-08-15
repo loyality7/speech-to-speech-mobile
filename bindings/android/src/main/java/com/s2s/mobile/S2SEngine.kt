@@ -565,6 +565,13 @@ class S2SEngine(
         emit(S2SEvent.ToolExecuted(name, result.output, result.isError))
         if (turns.isStale(turn)) return
 
+        // The tool call itself was generated, so it is already in the KV cache.
+        // Recording it keeps the history and the cache describing the same
+        // conversation — without it the cache anchor points at text that appears
+        // nowhere in the prompt, and every turn after a tool call pays a full
+        // prefill.
+        history.addAssistant(raw)
+
         // Feed the result back so the model can say what it did, rather than the
         // user hearing silence after a successful action.
         history.addToolResult(name, result.output)
