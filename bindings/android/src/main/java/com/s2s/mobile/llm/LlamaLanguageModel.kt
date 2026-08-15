@@ -56,6 +56,10 @@ class LlamaLanguageModel(
     @Volatile
     private var cacheTail: String? = null
 
+    /** True once reuse has worked, so losing it later can be reported as a fault. */
+    @Volatile
+    private var reusedBefore = false
+
     /** True once this instance won the process-wide claim, so failure knows to give it back. */
     private var claimed = false
 
@@ -131,16 +135,25 @@ class LlamaLanguageModel(
             // is everything after it. Anchoring on content rather than a count
             // survives history trimming and a cancelled reply being committed as a
             // partial assistant message.
-            val anchor = cacheTail?.let { tail -> messages.indexOfLast { it.content == tail } } ?: -1
+            //
+            // Compared trimmed on both sides. Models routinely emit a trailing
+            // newline, and a barge-in commits the partial reply through trim(), so
+            // an exact match would fail on whitespace alone — and once it fails it
+            // never recovers, silently costing a full prefill on every later turn.
+            val anchor = CacheAnchor.indexIn(messages, cacheTail)
             val reusable = active != null && !contextDirty && anchor >= 0
             val outgoing = if (reusable) messages.drop(anchor + 1) else messages
 
             if (!reusable) {
-                Log.i(
-                    TAG,
-                    "full prefill — session=${active != null}, dirty=$contextDirty, " +
-                        "anchor=$anchor, messages=${messages.size}",
-                )
+                // Warn rather than inform once reuse has worked before: losing it
+                // costs seconds per turn, and the only previous symptom was a log
+                // line nobody reads and a conversation that quietly got slower.
+                val lost = reusedBefore && active != null && !contextDirty
+                val message = "full prefill — session=${active != null}, dirty=$contextDirty, " +
+                    "anchor=$anchor, messages=${messages.size}"
+                if (lost) Log.w(TAG, "$message — cache reuse LOST, turns will be slow from here") else Log.i(TAG, message)
+            } else {
+                reusedBefore = true
             }
 
             if (active != null && !reusable) {
@@ -154,7 +167,8 @@ class LlamaLanguageModel(
 
             // Everything submitted is now in the cache, and so is whatever the
             // model generates from it.
-            cacheTail = outgoing.lastOrNull()?.content ?: cacheTail
+            // Trimmed, so it compares equal to whatever the engine commits.
+            cacheTail = outgoing.lastOrNull()?.content?.trim() ?: cacheTail
             val generated = StringBuilder()
 
             val callback = object : GenStream {
@@ -173,7 +187,7 @@ class LlamaLanguageModel(
                 }
 
                 override fun onComplete() {
-                    cacheTail = generated.toString().ifBlank { cacheTail }
+                    cacheTail = generated.toString().trim().ifBlank { cacheTail }
                     sink.onComplete()
                 }
 
