@@ -5,12 +5,50 @@ import com.s2s.mobile.pipeline.TtsBackend
 import java.io.File
 
 /**
- * Fully dynamic configuration factory that builds [S2SConfig] directly from the
- * JSON specification fields in each selected [ModelSpec].
+ * Turns registry [ModelSpec]s into stage configuration.
  *
- * Contains ZERO hardcoded model IDs or string matches in Kotlin.
+ * Every default lives here and nowhere else. When these mappings were also
+ * written out by hand at each call site they drifted — a TTS test screen built
+ * its synthesiser with a chunk floor of 6 while the engine used 10, so a voice
+ * could sound fine under test and stutter in the real pipeline.
+ *
+ * Contains no hardcoded model IDs: everything is read from the spec, and each
+ * `?:` is the fallback for a spec that does not pin that field.
  */
 object ModelConfigFactory {
+
+    fun stt(spec: ModelSpec) = SttConfig(
+        backend = when (spec.backend) {
+            "ZIPFORMER_TRANSDUCER" -> SttBackend.ZIPFORMER_TRANSDUCER
+            "WHISPER" -> SttBackend.WHISPER
+            else -> SttBackend.MOONSHINE
+        },
+        numThreads = spec.numThreads ?: 2,
+        decodingMethod = spec.decodingMethod ?: "modified_beam_search",
+        endpointTrailingSilence = spec.endpointTrailingSilence ?: 0.8f,
+    )
+
+    fun tts(spec: ModelSpec, speakerId: Int = 0) = TtsConfig(
+        backend = when (spec.backend) {
+            "KOKORO" -> TtsBackend.KOKORO
+            "KITTEN" -> TtsBackend.KITTEN
+            "MATCHA" -> TtsBackend.MATCHA
+            "POCKET" -> TtsBackend.POCKET
+            else -> TtsBackend.VITS
+        },
+        speakerId = speakerId,
+        numThreads = spec.numThreads ?: 2,
+        firstChunkMinChars = spec.firstChunkMinChars ?: 10,
+        maxChunkChars = spec.maxChunkChars ?: 70,
+        minChunkChars = spec.minChunkChars ?: 10,
+        speed = spec.speed ?: 1.05f,
+    )
+
+    fun llm(spec: ModelSpec) = LlmConfig(
+        numThreads = spec.numThreads ?: 4,
+        batchSize = spec.batchSize ?: 512,
+        maxTokens = spec.maxTokens ?: 256,
+    )
 
     fun create(
         baseModelsDir: File,
@@ -18,56 +56,15 @@ object ModelConfigFactory {
         sttSpec: ModelSpec,
         ttsSpec: ModelSpec,
         llmSpec: ModelSpec,
-    ): S2SConfig {
-        val modelPaths = ModelPaths(
+    ): S2SConfig = S2SConfig(
+        models = ModelPaths(
             vadModel = File(baseModelsDir, vadSpec.targetPath).absolutePath,
             sttDir = File(baseModelsDir, sttSpec.targetPath).absolutePath,
             llmModel = File(baseModelsDir, llmSpec.targetPath).absolutePath,
             ttsDir = File(baseModelsDir, ttsSpec.targetPath).absolutePath,
-        )
-
-        // 1. Dynamic STT Config from JSON specification
-        val sttBackend = when (sttSpec.backend) {
-            "ZIPFORMER_TRANSDUCER" -> SttBackend.ZIPFORMER_TRANSDUCER
-            "WHISPER" -> SttBackend.WHISPER
-            else -> SttBackend.MOONSHINE
-        }
-        val sttConfig = SttConfig(
-            backend = sttBackend,
-            numThreads = sttSpec.numThreads ?: 2,
-            decodingMethod = sttSpec.decodingMethod ?: "modified_beam_search",
-            endpointTrailingSilence = sttSpec.endpointTrailingSilence ?: 0.8f,
-        )
-
-        // 2. Dynamic LLM Config from JSON specification
-        val llmConfig = LlmConfig(
-            numThreads = llmSpec.numThreads ?: 4,
-            batchSize = llmSpec.batchSize ?: 512,
-            maxTokens = llmSpec.maxTokens ?: 256,
-        )
-
-        // 3. Dynamic TTS Config from JSON specification
-        val ttsBackend = when (ttsSpec.backend) {
-            "KOKORO" -> TtsBackend.KOKORO
-            "KITTEN" -> TtsBackend.KITTEN
-            "MATCHA" -> TtsBackend.MATCHA
-            else -> TtsBackend.VITS
-        }
-
-        val ttsConfig = TtsConfig(
-            backend = ttsBackend,
-            numThreads = ttsSpec.numThreads ?: 2,
-            firstChunkMinChars = ttsSpec.firstChunkMinChars ?: 10,
-            maxChunkChars = ttsSpec.maxChunkChars ?: 70,
-            minChunkChars = ttsSpec.minChunkChars ?: 10,
-            speed = ttsSpec.speed ?: 1.05f,
-        )
-
-        return S2SConfig(
-            models = modelPaths,
-            stt = sttConfig,
-            llm = llmConfig,
-            tts = ttsConfig,
-        )
-    }
+        ),
+        stt = stt(sttSpec),
+        llm = llm(llmSpec),
+        tts = tts(ttsSpec),
+    )
 }

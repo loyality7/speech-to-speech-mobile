@@ -2,15 +2,11 @@ package com.s2s.demo
 
 import android.Manifest
 import android.app.Activity
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
 import android.view.Gravity
@@ -27,10 +23,12 @@ import android.widget.TextView
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
 import com.s2s.mobile.config.ModelConfigFactory
-import com.s2s.mobile.model.ModelDownloadService
+import com.s2s.mobile.model.ModelDownloads
+import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.ModelDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
+import com.s2s.mobile.model.S2SModels
 import com.s2s.mobile.model.ModelSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,29 +66,13 @@ class MainActivity : Activity() {
     private var selectedTts: ModelSpec = ModelRegistry.DEFAULT_TTS
     private var selectedLlm: ModelSpec = ModelRegistry.DEFAULT_LLM
 
-    private var downloadService: ModelDownloadService? = null
-    private var isBound = false
+    private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
 
     private var engine: S2SEngine? = null
     private var running = false
     private var partialShown = false
     private val downloader by lazy { ModelDownloader(modelsDir()) }
-
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            val binder = service as ModelDownloadService.LocalBinder
-            val s = binder.getService()
-            downloadService = s
-            isBound = true
-            observeDownloadState(s)
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            downloadService = null
-            isBound = false
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -116,15 +98,14 @@ class MainActivity : Activity() {
         }
         updateStatus()
 
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        observeDownloadState()
     }
 
-    private fun observeDownloadState(service: ModelDownloadService) {
+    private fun observeDownloadState() {
         scope.launch {
-            service.downloadState.collect { state ->
+            downloads.state.collect { state ->
                 when (state) {
-                    is ModelDownloadService.DownloadState.Progress -> {
+                    is DownloadState.Progress -> {
                         isDownloading = true
                         downloadBtn.text = "Stop Download"
                         clearBtn.isEnabled = false
@@ -137,21 +118,21 @@ class MainActivity : Activity() {
                             else -> "${p.modelName} ${p.percent}%"
                         }
                     }
-                    is ModelDownloadService.DownloadState.Completed -> {
+                    is DownloadState.Completed -> {
                         isDownloading = false
                         downloadBtn.text = "Download Selected"
                         clearBtn.isEnabled = true
                         toggle.isEnabled = true
                         updateStatus()
                     }
-                    is ModelDownloadService.DownloadState.Error -> {
+                    is DownloadState.Error -> {
                         isDownloading = false
                         downloadBtn.text = "Download Selected"
                         clearBtn.isEnabled = true
                         toggle.isEnabled = true
                         status.text = "Download failed: ${state.message}"
                     }
-                    ModelDownloadService.DownloadState.Idle -> {
+                    DownloadState.Idle -> {
                         isDownloading = false
                         downloadBtn.text = "Download Selected"
                         clearBtn.isEnabled = true
@@ -344,25 +325,17 @@ class MainActivity : Activity() {
 
     private fun onDownloadOrStop() {
         if (isDownloading) {
-            downloadService?.stopDownload()
+            downloads.stop()
             status.text = "Stopping download…"
             return
         }
 
         val stack = getSelectedStack()
-        val pending = downloader.missing(stack)
-        if (pending.isEmpty()) {
+        if (downloader.missing(stack).isEmpty()) {
             status.text = "Selected models already installed!"
             return
         }
-
-        val serviceIntent = Intent(this, ModelDownloadService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-        downloadService?.startDownload(modelsDir(), stack)
+        downloads.start(stack)
     }
 
     private fun onClearModels() {
@@ -417,17 +390,13 @@ class MainActivity : Activity() {
                 selectedTts,
                 selectedLlm,
             )
-            val loaded = withContext(Dispatchers.IO) {
-                try {
-                    val e = S2SEngine(this@MainActivity, config)
-                    val res = e.initialize()
-                    if (res.isFailure) return@withContext null
-                    e.start()
-                    e
-                } catch (ex: Throwable) {
-                    Log.e("MainActivity", "Engine init failed", ex)
-                    null
-                }
+            // No withContext here: initialize() suspends onto Dispatchers.IO itself.
+            val loaded = try {
+                val e = S2SEngine(this@MainActivity, config)
+                if (e.initialize().isFailure) null else e.also { it.start() }
+            } catch (ex: Throwable) {
+                Log.e("MainActivity", "Engine init failed", ex)
+                null
             }
 
             toggle.isEnabled = true
@@ -495,14 +464,11 @@ class MainActivity : Activity() {
         transcript.text = base + text
     }
 
-    private fun modelsDir() = File(getExternalFilesDir(null), "models")
+    private fun modelsDir() = S2SModels.dir(this)
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isBound) {
-            unbindService(serviceConnection)
-            isBound = false
-        }
+        downloads.close()
         scope.cancel()
         releaseEngine()
     }
