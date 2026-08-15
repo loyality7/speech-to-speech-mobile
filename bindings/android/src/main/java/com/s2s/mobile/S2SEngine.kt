@@ -2,8 +2,10 @@ package com.s2s.mobile
 
 import android.content.Context
 import android.util.Log
+import com.s2s.mobile.audio.AudioFocusController
 import com.s2s.mobile.audio.MicrophoneInput
 import com.s2s.mobile.audio.SpeakerOutput
+import com.s2s.mobile.audio.VoiceSessionService
 import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.llm.ChatHistory
@@ -123,6 +125,12 @@ class S2SEngine(
     /** Set by any thread; applied by the audio thread, which owns those objects. */
     @Volatile private var resetRecognitionPending = false
 
+    /** Held only while listening; abandoned in [stop]. */
+    private var focus: AudioFocusController? = null
+
+    /** Capture is suspended for a call or alarm, with the models still loaded. */
+    @Volatile private var pausedForFocus = false
+
     /** What the user has said so far in the turn currently being answered. */
     @Volatile private var pendingUserText: String? = null
 
@@ -173,10 +181,38 @@ class S2SEngine(
         initialized = true
     }
 
-    /** Opens the microphone and starts listening. */
+    /**
+     * Opens the microphone and starts listening.
+     *
+     * Also claims audio focus and, unless the host opted out, starts a
+     * microphone-typed foreground service — without one Android stops delivering
+     * audio as soon as the app is backgrounded, and does it silently.
+     */
     fun start(): Boolean {
         check(initialized) { "initialize() must succeed before start()" }
         if (running) return true
+
+        if (config.audio.manageAudioFocus && !acquireFocus()) {
+            emit(S2SEvent.Error("Audio focus denied — something else owns the microphone"))
+            return false
+        }
+
+        if (config.audio.manageForegroundService) {
+            val started = VoiceSessionService.start(
+                context,
+                config.audio.serviceNotificationTitle,
+                config.audio.serviceNotificationText,
+            )
+            // Not fatal: capture works while the app is in front. Say so rather
+            // than let the mic die later with no explanation.
+            if (!started) {
+                emit(
+                    S2SEvent.Error(
+                        "Foreground service refused — listening will stop when the app is backgrounded",
+                    ),
+                )
+            }
+        }
 
         speaker?.start()
         recognizer.reset()
@@ -187,6 +223,7 @@ class S2SEngine(
         if (!microphone.start(::onFrame)) {
             emit(S2SEvent.Error("Microphone unavailable — is RECORD_AUDIO granted?"))
             speaker?.release()
+            releaseSessionResources()
             return false
         }
         running = true
@@ -203,7 +240,78 @@ class S2SEngine(
         microphone.stop()
         speaker?.flush()
         speaker?.release()
+        releaseSessionResources()
         setState(S2SState.IDLE)
+    }
+
+    /**
+     * Claims focus, wiring the loss callbacks to pause or stop.
+     *
+     * A transient loss — a call, an alarm — cuts the current turn and closes the
+     * microphone but keeps the models loaded, so resuming costs nothing. A
+     * permanent loss stops the engine outright.
+     */
+    private fun acquireFocus(): Boolean {
+        val controller = AudioFocusController(
+            context = context,
+            onLoss = {
+                emit(S2SEvent.AudioFocusLost(willResume = false))
+                stop()
+            },
+            onTransientLoss = {
+                emit(S2SEvent.AudioFocusLost(willResume = true))
+                pauseForFocus()
+            },
+            onRegained = {
+                emit(S2SEvent.AudioFocusRegained)
+                resumeAfterFocus()
+            },
+        )
+        focus = controller
+        if (controller.request()) return true
+        focus = null
+        return false
+    }
+
+    /**
+     * Stops capture and playback but keeps every model loaded.
+     *
+     * Reloading ~800 MB because someone's phone rang would be absurd, so this
+     * deliberately does far less than [stop].
+     */
+    private fun pauseForFocus() {
+        if (!running || pausedForFocus) return
+        pausedForFocus = true
+        turns.begin()
+        languageModel.cancel()
+        microphone.stop()
+        speaker?.flush()
+        // Release the track so the other app gets a clean audio path; start()
+        // rebuilds it, and routing is restored with it.
+        speaker?.release()
+        setState(S2SState.IDLE)
+    }
+
+    private fun resumeAfterFocus() {
+        if (!running || !pausedForFocus) return
+        pausedForFocus = false
+        speaker?.start()
+        resetRecognitionPending = true
+        chunker.reset()
+        synthesisDone = true
+        if (!microphone.start(::onFrame)) {
+            emit(S2SEvent.Error("Microphone did not come back after the interruption"))
+            stop()
+            return
+        }
+        setState(S2SState.LISTENING)
+    }
+
+    private fun releaseSessionResources() {
+        pausedForFocus = false
+        focus?.abandon()
+        focus = null
+        if (config.audio.manageForegroundService) VoiceSessionService.stop(context)
     }
 
     /** Frees every model. The engine cannot be reused afterwards. */

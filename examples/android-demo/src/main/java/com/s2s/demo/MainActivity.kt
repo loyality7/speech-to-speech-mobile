@@ -452,6 +452,19 @@ class MainActivity : Activity() {
                             "TTFA: ${event.metrics.timeToFirstAudioMs}ms"
 
                     is S2SEvent.ToolExecuted -> transcript.append("[tool ${event.name}] ${event.output}\n")
+
+                    is S2SEvent.AudioFocusLost -> if (event.willResume) {
+                        status.text = "Paused — something else is using the audio"
+                    } else {
+                        // The engine has already stopped itself, so the button has
+                        // to follow or it lies about the state.
+                        status.text = "Stopped — audio focus lost"
+                        running = false
+                        toggle.text = "Start Engine"
+                    }
+
+                    S2SEvent.AudioFocusRegained -> status.text = "Listening again"
+
                     is S2SEvent.Error -> status.text = "Error: ${event.message}"
                 }
             }

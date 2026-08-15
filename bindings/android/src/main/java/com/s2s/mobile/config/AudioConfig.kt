@@ -16,4 +16,23 @@ data class AudioConfig(
      * resampling pass on every chunk.
      */
     val playbackSampleRate: Int? = null,
+    /**
+     * Run a microphone-typed foreground service while the engine is listening.
+     *
+     * Android stops delivering audio to a backgrounded process, so without one the
+     * assistant goes deaf when the user switches apps. Set false only if the host
+     * app already runs its own microphone foreground service.
+     */
+    val manageForegroundService: Boolean = true,
+    /** Notification title while listening. Shown by the foreground service. */
+    val serviceNotificationTitle: String = "Listening",
+    val serviceNotificationText: String = "Voice assistant is active",
+    /**
+     * Hold audio focus while listening, and yield to calls and alarms.
+     *
+     * Disabling it means the assistant speaks over an incoming call, which is
+     * almost never what anyone wants — the switch exists for hosts that manage
+     * focus themselves at a higher level.
+     */
+    val manageAudioFocus: Boolean = true,
 )
