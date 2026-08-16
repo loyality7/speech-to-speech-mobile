@@ -17,6 +17,14 @@ import java.io.File
  */
 object ModelConfigFactory {
 
+    fun vad(spec: ModelSpec) = VadConfig(
+        backend = when (spec.backend) {
+            "TEN" -> VadBackend.TEN
+            else -> VadBackend.SILERO
+        },
+        numThreads = spec.numThreads ?: 1,
+    )
+
     fun stt(spec: ModelSpec) = SttConfig(
         backend = when (spec.backend) {
             "ZIPFORMER_TRANSDUCER" -> SttBackend.ZIPFORMER_TRANSDUCER
@@ -63,6 +71,7 @@ object ModelConfigFactory {
             llmModel = File(baseModelsDir, llmSpec.targetPath).absolutePath,
             ttsDir = File(baseModelsDir, ttsSpec.targetPath).absolutePath,
         ),
+        vad = vad(vadSpec),
         stt = stt(sttSpec),
         llm = llm(llmSpec),
         tts = tts(ttsSpec),

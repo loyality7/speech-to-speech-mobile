@@ -1,5 +1,10 @@
 package com.s2s.mobile.config
 
+enum class VadBackend {
+    SILERO,
+    TEN,
+}
+
 /**
  * Voice activity detection.
  *
@@ -9,6 +14,7 @@ package com.s2s.mobile.config
  * most important setting for transcript quality.
  */
 data class VadConfig(
+    val backend: VadBackend = VadBackend.SILERO,
     /** Speech probability above which a frame counts as voice. */
     val threshold: Float = 0.5f,
 

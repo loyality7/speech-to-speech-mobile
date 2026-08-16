@@ -9,6 +9,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
+import com.k2fsa.sherpa.onnx.TenVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.s2s.mobile.config.AudioConfig
@@ -60,19 +61,36 @@ class OfflineVadRecognizer(
         require(vadModel.isFile) { "Silero VAD model not found: ${vadModel.absolutePath}" }
 
         vad = Vad(
-            config = VadModelConfig(
-                sileroVadModelConfig = SileroVadModelConfig(
-                    model = vadModel.absolutePath,
-                    threshold = vadConfig.threshold,
-                    minSilenceDuration = vadConfig.minSilenceSeconds,
-                    minSpeechDuration = vadConfig.minSpeechSeconds,
-                    windowSize = audioConfig.frameSize,
-                    maxSpeechDuration = vadConfig.maxSpeechSeconds,
-                ),
-                sampleRate = audioConfig.sampleRate,
-                numThreads = 1,
-                provider = "cpu",
-            ),
+            config = when (vadConfig.backend) {
+                com.s2s.mobile.config.VadBackend.TEN -> VadModelConfig(
+                    sileroVadModelConfig = SileroVadModelConfig(),
+                    tenVadModelConfig = TenVadModelConfig(
+                        vadModel.absolutePath,
+                        vadConfig.threshold,
+                        vadConfig.minSilenceSeconds,
+                        vadConfig.minSpeechSeconds,
+                        256,
+                        vadConfig.maxSpeechSeconds,
+                    ),
+                    sampleRate = audioConfig.sampleRate,
+                    numThreads = 1,
+                    provider = "cpu",
+                )
+                com.s2s.mobile.config.VadBackend.SILERO -> VadModelConfig(
+                    sileroVadModelConfig = SileroVadModelConfig(
+                        vadModel.absolutePath,
+                        vadConfig.threshold,
+                        vadConfig.minSilenceSeconds,
+                        vadConfig.minSpeechSeconds,
+                        audioConfig.frameSize,
+                        vadConfig.maxSpeechSeconds,
+                    ),
+                    tenVadModelConfig = TenVadModelConfig(),
+                    sampleRate = audioConfig.sampleRate,
+                    numThreads = 1,
+                    provider = "cpu",
+                )
+            },
         )
 
         val tokens = File(dir, "tokens.txt")

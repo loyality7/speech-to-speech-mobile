@@ -11,11 +11,11 @@ import com.s2s.mobile.pipeline.VoiceActivityDetector
 import java.io.File
 
 /**
- * Silero VAD v5 running on ONNX Runtime, via sherpa-onnx.
+ * TEN VAD (~0.3 MB ultra-lightweight VAD model) running on ONNX Runtime via sherpa-onnx.
  *
  * Used for barge-in only — turn ends come from the recogniser's endpointer.
  */
-class SileroVad(
+class TenVad(
     private val vadConfig: VadConfig,
     private val audioConfig: AudioConfig,
     private val modelPath: String,
@@ -23,16 +23,17 @@ class SileroVad(
 
     private var vad: Vad? = null
 
-    /** Silero v5 is trained on 512-sample windows at 16 kHz. */
-    override val frameSize: Int get() = audioConfig.frameSize
+    /** TEN VAD uses 256-sample windows at 16 kHz. */
+    override val frameSize: Int get() = 256
 
     override fun initialize(): Result<Unit> = runCatching {
         val model = File(modelPath)
-        require(model.isFile) { "Silero VAD model not found: ${model.absolutePath}" }
+        require(model.isFile) { "TEN VAD model not found: ${model.absolutePath}" }
 
         vad = Vad(
             config = VadModelConfig(
-                sileroVadModelConfig = SileroVadModelConfig(
+                sileroVadModelConfig = SileroVadModelConfig(),
+                tenVadModelConfig = TenVadModelConfig(
                     model.absolutePath,
                     vadConfig.threshold,
                     vadConfig.minSilenceSeconds,
@@ -40,7 +41,6 @@ class SileroVad(
                     frameSize,
                     vadConfig.maxSpeechSeconds,
                 ),
-                tenVadModelConfig = TenVadModelConfig(),
                 sampleRate = audioConfig.sampleRate,
                 numThreads = vadConfig.numThreads,
                 provider = "cpu",
@@ -66,6 +66,6 @@ class SileroVad(
     }
 
     private companion object {
-        const val TAG = "S2S-SileroVad"
+        const val TAG = "S2S-TenVad"
     }
 }

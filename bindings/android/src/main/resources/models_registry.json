@@ -10,7 +10,8 @@
       "archive": false,
       "approxBytes": 2327524,
       "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
-      "version": "v5"
+      "version": "v5",
+      "backend": "SILERO"
     },
     {
       "id": "ten_vad",
@@ -21,7 +22,8 @@
       "archive": false,
       "approxBytes": 332211,
       "sha256": "718cb7eef47e3cf5ddbe7e967a7503f46b8b469c0706872f494dfa921b486206",
-      "version": "v1"
+      "version": "v1",
+      "backend": "TEN"
     },
     {
       "id": "stt_moonshine_base",

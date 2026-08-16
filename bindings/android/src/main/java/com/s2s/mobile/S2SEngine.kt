@@ -81,7 +81,7 @@ private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
 class S2SEngine(
     private val context: Context,
     private val config: S2SConfig,
-    private val vad: VoiceActivityDetector = SileroVad(config.vad, config.audio, config.models.vadModel),
+    private val vad: VoiceActivityDetector = defaultVad(config),
     private val recognizer: SpeechRecognizer = defaultRecognizer(config),
     private val languageModel: LanguageModel = LlamaLanguageModel(config.llm, config.models.llmModel),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
@@ -658,3 +658,10 @@ class S2SEngine(
         const val TAG = "S2SEngine"
     }
 }
+
+private fun defaultVad(config: S2SConfig): VoiceActivityDetector =
+    when (config.vad.backend) {
+        com.s2s.mobile.config.VadBackend.TEN -> com.s2s.mobile.vad.TenVad(config.vad, config.audio, config.models.vadModel)
+        com.s2s.mobile.config.VadBackend.SILERO -> com.s2s.mobile.vad.SileroVad(config.vad, config.audio, config.models.vadModel)
+    }
+
