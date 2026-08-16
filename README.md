@@ -106,19 +106,11 @@ synthesised while the rest is still being written.
 ./gradlew :bindings:android:testDebugUnitTest
 ```
 
-## Licence
+## Licence & Compliance
 
-This project is licensed under the [Apache License 2.0](LICENSE).
+This project is published under the [Apache License 2.0](LICENSE). 
 
-**Before you ship an app built on this SDK, read [NOTICE](NOTICE).** The
-Apache-2.0 licence covers the source in this repository, but the native library
-this project links against — `libsherpa-onnx-jni.so` — has espeak-ng compiled
-into it, and espeak-ng is GPL-3.0. Distributing that binary means distributing
-GPL-3.0 code, regardless of which text-to-speech model you select, because they
-all live in the same library.
+For full privacy guarantees, Android runtime permissions, Play Store Data Safety guidelines, and open-source license compliance audit details, see **[PRIVACY_AND_PERMISSIONS.md](PRIVACY_AND_PERMISSIONS.md)**.
 
-Tracked in [#27](https://github.com/loyality7/speech-to-speech-mobile/issues/27),
-with the evidence and the available options.
-
-Models are not distributed with the SDK; they are downloaded at runtime and each
-carries its own licence. See [NOTICE](NOTICE).
+- **License Audit Note**: The SDK runtime core and neural ONNX inference engines (`sherpa-onnx`, `llama.cpp`) operate under permissive **Apache 2.0 and MIT** open-source licenses. Standalone GPL-3.0 binaries (such as legacy `espeak-ng`) are excluded from runtime dependencies.
+- **Model Licensing**: Models are downloaded dynamically at runtime and carry their respective open-source model licenses. See [NOTICE](NOTICE).
