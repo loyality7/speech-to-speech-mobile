@@ -1,6 +1,6 @@
 # Speech-to-Speech Mobile
 
-[![CI Tests](https://img.shields.io/badge/CI_Tests-passing-brightgreen)](#tests) [![Release](https://img.shields.io/badge/Release-v1.0.0-blue)](#building) [![Android](https://img.shields.io/badge/Android-AAR_%2F_Kotlin-green)](#layout) [![C++ Core](https://img.shields.io/badge/C%2B%2B-17_Core-blue) [![Licence](https://img.shields.io/badge/Licence-GPL_3.0-blue)](#licence--compliance)
+[![CI Tests](https://img.shields.io/badge/CI_Tests-passing-brightgreen)](#tests) [![Release](https://img.shields.io/badge/Release-v1.0.0-blue)](#building) [![Android](https://img.shields.io/badge/Android-AAR_%2F_Kotlin-green)](#layout) [![C++ Core](https://img.shields.io/badge/C%2B%2B-17_Core-blue)](#backends) [![Licence](https://img.shields.io/badge/Licence-GPL_3.0-blue)](#licence--compliance)
 
 A high-performance, modular, 100% local on-device Speech-to-Speech conversational engine package designed for mobile devices (Android & iOS) and edge systems.
 
@@ -116,14 +116,18 @@ For full battery discharge rates, CPU thermal profiling, and memory footprint be
 
 ## Licence & Compliance
 
-This project is published under the [Apache License 2.0](LICENSE). 
+> [!IMPORTANT]
+> **PLANNED LICENSE TRANSITION NOTICE**  
+> This project is currently published under the **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)** due to the static linking of `espeak-ng` (GPL-3.0) inside `libsherpa-onnx-jni.so` (v1.13.5).
+>
+> **Soon as upstream `sherpa-onnx` v2.0.0 is released ([k2-fsa/sherpa-onnx#3731](https://github.com/k2-fsa/sherpa-onnx/pull/3731)) decoupling `espeak-ng`, this project will immediately transition back to the Apache License 2.0.**
+>
+> Tracked in [#27](https://github.com/loyality7/speech-to-speech-mobile/issues/27).
 
 For full privacy guarantees, Android runtime permissions, Play Store Data Safety guidelines, and open-source license compliance audit details, see **[PRIVACY_AND_PERMISSIONS.md](PRIVACY_AND_PERMISSIONS.md)**.
 
-**Before you ship an app built on this SDK, read [NOTICE](NOTICE).** Our own source is Apache-2.0, and `llama.cpp`/Llamatik is MIT, but the speech library we link against — `libsherpa-onnx-jni.so` — has **espeak-ng compiled into it**, and espeak-ng is **GPL-3.0**. Distributing that binary means distributing GPL-3.0 code, whichever text-to-speech model you select, because they all live in the same library.
+**Before you ship an app built on this SDK, read [NOTICE](NOTICE).** The speech library we link against — `libsherpa-onnx-jni.so` — has **espeak-ng compiled into it**, and espeak-ng is **GPL-3.0**. Distributing that binary means distributing GPL-3.0 code, whichever text-to-speech model you select, because they all live in the same library.
 
 Verified in the shipped binary: espeak-ng's own data-file names (`phondata`, `phontab`, `phonindex`, `intonations`) and the source string `"Could not load the mbrola.dll file"`. Every Piper and Kokoro bundle also ships an `espeak-ng-data/` directory.
-
-Tracked in [#27](https://github.com/loyality7/speech-to-speech-mobile/issues/27). sherpa-onnx is removing espeak-ng in 2.0.0 ([k2-fsa/sherpa-onnx#3731](https://github.com/k2-fsa/sherpa-onnx/pull/3731)), which will resolve this at the source; until then this is an open question for anyone shipping closed-source.
 
 **Model licensing**: models are downloaded at runtime and carry their own licences. See [NOTICE](NOTICE).
