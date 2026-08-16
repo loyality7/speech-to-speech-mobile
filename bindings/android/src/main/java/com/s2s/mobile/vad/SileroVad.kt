@@ -23,8 +23,8 @@ class SileroVad(
 
     private var vad: Vad? = null
 
-    /** Silero v5 is trained on 512-sample windows at 16 kHz. */
-    override val frameSize: Int get() = audioConfig.frameSize
+    /** Taken from the backend so capture, VAD and recogniser cannot disagree. */
+    override val frameSize: Int get() = vadConfig.backend.windowSize
 
     override fun initialize(): Result<Unit> = runCatching {
         val model = File(modelPath)

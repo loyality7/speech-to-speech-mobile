@@ -60,8 +60,26 @@ class LlamaLanguageModel(
     @Volatile
     private var reusedBefore = false
 
+    /**
+     * Set while a generation is streaming.
+     *
+     * trimMemory() arrives on whatever thread onTrimMemory() runs on — usually the
+     * main thread — while generation runs on the LLM worker. Resetting the session
+     * underneath an active stream would pull the KV state out from under it, so a
+     * purge that lands mid-turn is deferred instead.
+     */
+    @Volatile
+    private var generating = false
+
+    /** A purge asked for while generating; applied when the turn ends. */
+    @Volatile
+    private var purgePending = false
+
     /** True once this instance won the process-wide claim, so failure knows to give it back. */
     private var claimed = false
+
+    /** Guards cache-state mutation against a concurrent purge. */
+    private val cacheLock = Any()
 
     override fun initialize(): Result<Unit> = runCatching {
         val gguf = File(modelPath)
@@ -203,10 +221,19 @@ class LlamaLanguageModel(
                 override fun onError(message: String) = sink.onError(message)
             }
 
-            if (active != null) {
-                active.stream(prompt, callback)
-            } else {
-                LlamaBridge.generateStream(prompt = prompt, callback = callback)
+            generating = true
+            try {
+                if (active != null) {
+                    active.stream(prompt, callback)
+                } else {
+                    LlamaBridge.generateStream(prompt = prompt, callback = callback)
+                }
+            } finally {
+                generating = false
+                if (purgePending) {
+                    purgePending = false
+                    purgeCache()
+                }
             }
         } catch (e: Throwable) {
             Log.e(TAG, "generation failed", e)
@@ -225,7 +252,19 @@ class LlamaLanguageModel(
     }
 
     override fun trimMemory() {
-        Log.i(TAG, "trimMemory requested — purging KV session cache buffers")
+        if (generating) {
+            // Resetting the session mid-stream would corrupt the state the active
+            // generation is reading from. The next turn will pay a full prefill
+            // either way, so waiting costs nothing.
+            Log.i(TAG, "trimMemory requested during generation — deferred to end of turn")
+            purgePending = true
+            return
+        }
+        purgeCache()
+    }
+
+    private fun purgeCache() = synchronized(cacheLock) {
+        Log.i(TAG, "purging KV session cache buffers")
         contextDirty = true
         cacheTail = null
         runCatching { LlamaBridge.sessionReset() }

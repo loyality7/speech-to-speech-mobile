@@ -45,7 +45,9 @@ class ModelDownloader(private val modelsDir: File) {
     }
 
     /** Calculates exact disk space in bytes used by a model (file or extracted archive directory). */
-    fun diskUsage(spec: ModelSpec): Long {
+    suspend fun diskUsage(spec: ModelSpec): Long = withContext(Dispatchers.IO) { diskUsageBlocking(spec) }
+
+    private fun diskUsageBlocking(spec: ModelSpec): Long {
         val target = File(modelsDir, spec.targetPath)
         if (!target.exists()) return 0L
         return if (target.isDirectory) {
@@ -56,13 +58,15 @@ class ModelDownloader(private val modelsDir: File) {
     }
 
     /** Total disk space in bytes used by all files in the models directory. */
-    fun totalDiskUsage(): Long {
+    suspend fun totalDiskUsage(): Long = withContext(Dispatchers.IO) { totalDiskUsageBlocking() }
+
+    private fun totalDiskUsageBlocking(): Long {
         if (!modelsDir.exists()) return 0L
         return modelsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
 
     /** Returns disk accounting and installation status for every known model specification. */
-    fun getInstalledModels(allSpecs: List<ModelSpec> = ModelRegistry.ALL_MODELS): List<InstalledModelInfo> {
+    suspend fun getInstalledModels(allSpecs: List<ModelSpec> = ModelRegistry.ALL_MODELS): List<InstalledModelInfo> {
         return allSpecs.map { spec ->
             InstalledModelInfo(
                 spec = spec,

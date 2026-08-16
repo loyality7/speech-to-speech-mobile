@@ -64,16 +64,24 @@ object ModelConfigFactory {
         sttSpec: ModelSpec,
         ttsSpec: ModelSpec,
         llmSpec: ModelSpec,
-    ): S2SConfig = S2SConfig(
-        models = ModelPaths(
-            vadModel = File(baseModelsDir, vadSpec.targetPath).absolutePath,
-            sttDir = File(baseModelsDir, sttSpec.targetPath).absolutePath,
-            llmModel = File(baseModelsDir, llmSpec.targetPath).absolutePath,
-            ttsDir = File(baseModelsDir, ttsSpec.targetPath).absolutePath,
-        ),
-        vad = vad(vadSpec),
-        stt = stt(sttSpec),
-        llm = llm(llmSpec),
-        tts = tts(ttsSpec),
-    )
+    ): S2SConfig {
+        val vadConfig = vad(vadSpec)
+        // Capture has to produce the window the detector expects, so the frame
+        // size follows the VAD backend rather than being assumed. Silero wants
+        // 512 samples, TEN wants 256.
+        val audioConfig = AudioConfig(frameSize = vadConfig.backend.windowSize)
+        return S2SConfig(
+            models = ModelPaths(
+                vadModel = File(baseModelsDir, vadSpec.targetPath).absolutePath,
+                sttDir = File(baseModelsDir, sttSpec.targetPath).absolutePath,
+                llmModel = File(baseModelsDir, llmSpec.targetPath).absolutePath,
+                ttsDir = File(baseModelsDir, ttsSpec.targetPath).absolutePath,
+            ),
+            audio = audioConfig,
+            vad = vadConfig,
+            stt = stt(sttSpec),
+            llm = llm(llmSpec),
+            tts = tts(ttsSpec),
+        )
+    }
 }
