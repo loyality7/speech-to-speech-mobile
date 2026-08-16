@@ -1,6 +1,6 @@
 # Speech-to-Speech Mobile
 
-[![CI Tests](https://img.shields.io/badge/CI_Tests-passing-brightgreen)](#tests) [![Release](https://img.shields.io/badge/Release-v1.0.0-blue)](#building) [![Android](https://img.shields.io/badge/Android-AAR_%2F_Kotlin-green)](#layout) [![C++ Core](https://img.shields.io/badge/C%2B%2B-17_Core-blue)](#backends) [![Licence](https://img.shields.io/badge/Licence-Apache_2.0-blue)](#licence--compliance)
+[![CI Tests](https://img.shields.io/badge/CI_Tests-passing-brightgreen)](#tests) [![Release](https://img.shields.io/badge/Release-v1.0.0-blue)](#building) [![Android](https://img.shields.io/badge/Android-AAR_%2F_Kotlin-green)](#layout) [![C++ Core](https://img.shields.io/badge/C%2B%2B-17_Core-blue) [![Licence](https://img.shields.io/badge/Licence-GPL_3.0-blue)](#licence--compliance)
 
 A high-performance, modular, 100% local on-device Speech-to-Speech conversational engine package designed for mobile devices (Android & iOS) and edge systems.
 
