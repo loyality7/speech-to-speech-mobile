@@ -142,4 +142,30 @@ class EngineIntegrationTest {
         tts.synthesize("hello", { true }) { chunkReceived = true }
         assertTrue(chunkReceived)
     }
+
+    @Test
+    fun testFailingLanguageModelDoesNotStuckInThinking() {
+        val throwingLlm = object : LanguageModel {
+            override fun initialize() = Result.success(Unit)
+            override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
+                throw RuntimeException("Simulated LLM OOM / crash")
+            }
+            override fun cancel() {}
+            override fun resetContext() {}
+            override fun trimMemory() {}
+            override fun release() {}
+        }
+
+        var exceptionThrown = false
+        try {
+            throwingLlm.generate(emptyList(), object : TokenSink {
+                override fun onToken(text: String) {}
+                override fun onComplete() {}
+                override fun onError(message: String, cause: Throwable?) {}
+            })
+        } catch (e: Exception) {
+            exceptionThrown = true
+        }
+        assertTrue(exceptionThrown)
+    }
 }

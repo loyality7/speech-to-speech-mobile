@@ -542,50 +542,64 @@ class S2SEngine(
         val toolPrompt = if (config.llm.toolsEnabled) tools.promptSection() else null
         val reply = StringBuilder()
 
-        languageModel.generate(
-            history.messages(extraSystem = toolPrompt),
-            object : TokenSink {
-                override fun onToken(text: String) {
-                    if (turns.isStale(turn)) return
-                    if (firstTokenMs == 0L) firstTokenMs = System.currentTimeMillis() - turnEndedAt
-                    reply.append(text)
-                    partialReply = reply.toString()
-                    emit(S2SEvent.AssistantDelta(text))
-                    // A tool call must not be spoken aloud, and it only becomes
-                    // recognisable once the object closes — so hold synthesis
-                    // until completion when tools are on.
-                    if (!config.llm.toolsEnabled) {
-                        chunker.accept(text).forEach { speak(turn, it) }
-                    }
-                }
-
-                override fun onComplete() {
-                    if (turns.isStale(turn)) return
-                    val full = reply.toString()
-
-                    if (config.llm.toolsEnabled) {
-                        val call = tools.parse(full)
-                        if (call != null) {
-                            runTool(turn, call.name, full)
-                            return
+        try {
+            languageModel.generate(
+                history.messages(extraSystem = toolPrompt),
+                object : TokenSink {
+                    override fun onToken(text: String) {
+                        if (turns.isStale(turn)) return
+                        if (firstTokenMs == 0L) firstTokenMs = System.currentTimeMillis() - turnEndedAt
+                        reply.append(text)
+                        partialReply = reply.toString()
+                        emit(S2SEvent.AssistantDelta(text))
+                        // A tool call must not be spoken aloud, and it only becomes
+                        // recognisable once the object closes — so hold synthesis
+                        // until completion when tools are on.
+                        if (!config.llm.toolsEnabled) {
+                            chunker.accept(text).forEach { speak(turn, it) }
                         }
-                        // Not a tool call after all: speak it now.
-                        chunker.accept(full).forEach { speak(turn, it) }
                     }
-                    chunker.flush()?.let { speak(turn, it) }
-                    history.addAssistant(full)
-                    emit(S2SEvent.AssistantDone(full))
-                    markSynthesisDone(turn)
-                }
 
-                override fun onError(message: String, cause: Throwable?) {
-                    if (turns.isStale(turn)) return
-                    synthesisDone = true
-                    emit(S2SEvent.Error("LLM error: $message", cause))
-                    if (running) setState(S2SState.LISTENING)
-                }
-            },
-        )
+                    override fun onComplete() {
+                        if (turns.isStale(turn)) return
+                        val full = reply.toString()
+
+                        if (config.llm.toolsEnabled) {
+                            val call = tools.parse(full)
+                            if (call != null) {
+                                runTool(turn, call.name, full)
+                                return
+                            }
+                            // Not a tool call after all: speak it now.
+                            chunker.accept(full).forEach { speak(turn, it) }
+                        }
+                        chunker.flush()?.let { speak(turn, it) }
+                        if (full.isNotBlank()) {
+                            history.addAssistant(full)
+                            emit(S2SEvent.AssistantDone(full))
+                        }
+                        markSynthesisDone(turn)
+                        if (full.isBlank() && running && _state.value == S2SState.THINKING) {
+                            setState(S2SState.LISTENING)
+                        }
+                    }
+
+                    override fun onError(message: String, cause: Throwable?) {
+                        if (turns.isStale(turn)) return
+                        synthesisDone = true
+                        emit(S2SEvent.Error("LLM error: $message", cause))
+                        if (running) setState(S2SState.LISTENING)
+                    }
+                },
+            )
+        } catch (e: Throwable) {
+            if (!turns.isStale(turn)) {
+                Log.e(TAG, "Turn $turn generation failed with exception", e)
+                synthesisDone = true
+                emit(S2SEvent.Error("LLM error: ${e.message}", e))
+                if (running) setState(S2SState.LISTENING)
+            }
+        }
     }
 
     private fun runTool(turn: Int, name: String, raw: String) {
