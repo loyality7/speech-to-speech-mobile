@@ -479,6 +479,12 @@ class MainActivity : Activity() {
 
     private fun modelsDir() = S2SModels.dir(this)
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Log.w("MainActivity", "onTrimMemory level=$level received")
+        engine?.onTrimMemory(level)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         downloads.close()

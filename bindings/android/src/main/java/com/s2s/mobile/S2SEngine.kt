@@ -245,6 +245,16 @@ class S2SEngine(
     }
 
     /**
+     * Responds to OS memory pressure signals (e.g. ComponentCallbacks2.onTrimMemory).
+     *
+     * Trims non-essential KV cache buffers when memory is low to prevent process termination.
+     */
+    fun onTrimMemory(level: Int) {
+        Log.i(TAG, "onTrimMemory level=$level received")
+        languageModel.trimMemory()
+    }
+
+    /**
      * Claims focus, wiring the loss callbacks to pause or stop.
      *
      * A transient loss — a call, an alarm — cuts the current turn and closes the

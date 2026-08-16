@@ -33,6 +33,12 @@ interface LanguageModel {
      */
     fun resetContext()
 
+    /**
+     * Optional memory trimming hook. Trims non-essential KV cache buffers when the OS
+     * signals memory pressure (e.g. ComponentCallbacks2.onTrimMemory).
+     */
+    fun trimMemory() {}
+
     fun release()
 }
 

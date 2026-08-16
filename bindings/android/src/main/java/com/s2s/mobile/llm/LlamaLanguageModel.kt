@@ -224,6 +224,14 @@ class LlamaLanguageModel(
         contextDirty = true
     }
 
+    override fun trimMemory() {
+        Log.i(TAG, "trimMemory requested — purging KV session cache buffers")
+        contextDirty = true
+        cacheTail = null
+        runCatching { LlamaBridge.sessionReset() }
+            .onFailure { Log.w(TAG, "sessionReset failed during trimMemory", it) }
+    }
+
     override fun release() {
         loaded = false
         runCatching { session?.close() }

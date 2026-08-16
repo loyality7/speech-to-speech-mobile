@@ -29,6 +29,11 @@ class VoiceSessionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Log.w(TAG, "onTrimMemory level=$level received by VoiceSessionService")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Listening"
