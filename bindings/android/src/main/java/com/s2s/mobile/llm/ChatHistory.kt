@@ -86,6 +86,37 @@ class ChatHistory(
         summary = null
     }
 
+    /** Serializes state to JSON for process death persistence. */
+    fun toJson(): String = synchronized(lock) {
+        val root = org.json.JSONObject()
+        root.put("system", system)
+        summary?.let { root.put("summary", it) }
+        val turnsArray = org.json.JSONArray()
+        turns.forEach { msg ->
+            val obj = org.json.JSONObject()
+            obj.put("role", msg.role)
+            obj.put("content", msg.content)
+            turnsArray.put(obj)
+        }
+        root.put("turns", turnsArray)
+        root.toString()
+    }
+
+    /** Restores conversation state from serialized JSON. */
+    fun fromJson(json: String) = synchronized(lock) {
+        val root = org.json.JSONObject(json)
+        if (root.has("system")) system = root.getString("system")
+        summary = if (root.has("summary") && !root.isNull("summary")) root.getString("summary") else null
+        turns.clear()
+        if (root.has("turns")) {
+            val array = root.getJSONArray("turns")
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                turns.addLast(ChatMessage(obj.getString("role"), obj.getString("content")))
+            }
+        }
+    }
+
     companion object {
         /**
          * Free fallback summariser: keeps the first clause of each dropped turn.

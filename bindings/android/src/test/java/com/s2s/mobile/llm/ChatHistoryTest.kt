@@ -109,4 +109,26 @@ class ChatHistoryTest {
         assertEquals("assistant", messages.last().role)
         assertEquals("First answer", messages.last().content)
     }
+
+    @Test
+    fun testToJsonAndFromJsonSerialization() {
+        val history = ChatHistory("Custom system prompt", keepTurns = 6)
+        history.addUser("What is the capital of France?")
+        history.addAssistant("The capital of France is Paris.")
+
+        val json = history.toJson()
+        assertTrue(json.contains("Custom system prompt"))
+        assertTrue(json.contains("capital of France"))
+
+        val restoredHistory = ChatHistory("Initial prompt")
+        restoredHistory.fromJson(json)
+
+        val restoredMessages = restoredHistory.messages()
+        assertEquals(3, restoredMessages.size)
+        assertEquals("Custom system prompt", restoredMessages[0].content)
+        assertEquals("user", restoredMessages[1].role)
+        assertEquals("What is the capital of France?", restoredMessages[1].content)
+        assertEquals("assistant", restoredMessages[2].role)
+        assertEquals("The capital of France is Paris.", restoredMessages[2].content)
+    }
 }

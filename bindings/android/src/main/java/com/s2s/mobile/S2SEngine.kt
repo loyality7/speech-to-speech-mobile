@@ -423,6 +423,16 @@ class S2SEngine @JvmOverloads constructor(
         languageModel.resetContext()
     }
 
+    /** Serializes active conversation memory to JSON for process death persistence. */
+    fun saveConversationState(): String = history.toJson()
+
+    /** Restores conversation memory from serialized JSON. */
+    fun restoreConversationState(json: String) {
+        interrupt()
+        history.fromJson(json)
+        languageModel.resetContext()
+    }
+
     // ── Audio in ────────────────────────────────────────────────────────
 
     private fun onFrame(frame: FloatArray) {
