@@ -4,7 +4,7 @@ This document outlines the privacy design, Android runtime permissions, Play Sto
 
 ---
 
-## 🔒 1. Privacy Architecture (100% On-Device)
+## 1. Privacy Architecture (100% On-Device)
 
 The SDK operates **100% locally on-device**. No voice audio, microphone recordings, transcription text, or LLM token streams are ever transmitted to remote servers.
 
@@ -14,7 +14,7 @@ The SDK operates **100% locally on-device**. No voice audio, microphone recordin
 
 ---
 
-## 📱 2. Android Runtime Permissions
+## 2. Android Runtime Permissions
 
 To integrate the SDK into an Android app, the host app requires the following permissions declared in its `AndroidManifest.xml`:
 
@@ -35,7 +35,7 @@ When publishing an application using this SDK to the Google Play Store, complete
 
 ---
 
-## ⚖️ 3. Open Source Licensing & Compliance Audit
+## 3. Open Source Licensing & Compliance Audit
 
 The SDK core is published under the **Apache License 2.0**. Native runtime dependencies are audited for license compatibility:
 
@@ -53,7 +53,7 @@ The SDK core is published under the **Apache License 2.0**. Native runtime depen
 
 ---
 
-## 🛡️ 4. Android 14 Target SDK 34 Compliance
+## 4. Android 14 Target SDK 34 Compliance
 
 When targeting Android 14 (`targetSdk 34`), declare the service type explicitly in your `AndroidManifest.xml` if using background voice sessions:
 
