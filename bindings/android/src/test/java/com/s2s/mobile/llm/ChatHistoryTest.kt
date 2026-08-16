@@ -90,4 +90,23 @@ class ChatHistoryTest {
         latch.await()
         assertTrue(history.messages().isNotEmpty())
     }
+
+    @Test
+    fun testDropLastUserIfUnanswered() {
+        val history = ChatHistory("System prompt")
+        history.addUser("First question")
+        history.addAssistant("First answer")
+        history.addUser("Interrupted question")
+
+        // Before drop: 4 messages (system + 1st QA + interrupted question)
+        assertEquals(4, history.messages().size)
+
+        history.dropLastUserIfUnanswered()
+
+        // After drop: 3 messages (system + 1st QA). Interrupted user question removed.
+        val messages = history.messages()
+        assertEquals(3, messages.size)
+        assertEquals("assistant", messages.last().role)
+        assertEquals("First answer", messages.last().content)
+    }
 }

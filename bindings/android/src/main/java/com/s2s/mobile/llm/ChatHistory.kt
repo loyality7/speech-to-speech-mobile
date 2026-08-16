@@ -40,6 +40,16 @@ class ChatHistory(
 
     fun addAssistant(text: String) = append(ChatMessage("assistant", text))
 
+    /**
+     * Removes the last turn if it was an unanswered user message.
+     * Called when a turn is interrupted before any assistant text was generated.
+     */
+    fun dropLastUserIfUnanswered() = synchronized(lock) {
+        if (turns.lastOrNull()?.role == "user") {
+            turns.removeLast()
+        }
+    }
+
     /** Records a tool result so the model can speak about what it just did. */
     fun addToolResult(name: String, output: String) =
         append(ChatMessage("user", "[tool $name returned] $output"))

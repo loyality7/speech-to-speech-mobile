@@ -366,10 +366,15 @@ class S2SEngine(
         // Record what was actually said before the cut. The user heard it, so the
         // model should know it said it — and it keeps any KV cache consistent with
         // the prompt, which is what lets the next turn reuse the cache instead of
-        // rebuilding the whole conversation.
-        partialReply.trim().takeIf { it.isNotEmpty() }?.let {
-            history.addAssistant(it)
+        // rebuilding the whole conversation. If interrupted before any tokens were
+        // generated, drop the unanswered user turn so history does not contain
+        // consecutive user turns.
+        val replyText = partialReply.trim()
+        if (replyText.isNotEmpty()) {
+            history.addAssistant(replyText)
             partialReply = ""
+        } else {
+            history.dropLastUserIfUnanswered()
         }
         speaker?.flush()
         chunker.reset()
