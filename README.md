@@ -19,16 +19,27 @@ graph LR
 
 ## Documentation
 
-For full architectural specifications, API guides, and integration tutorials, explore the **[docs/](docs/README.md)** portal:
+Explore the complete **[Documentation Portal (docs/)](docs/README.md)**:
 
-- **[Getting Started Guide](docs/getting-started.md)**: Setup prerequisites, permissions, and minimal Activity setup.
+- **[Getting Started Guide](docs/getting-started.md)**: Setup prerequisites, permissions, and initial Activity setup.
+- **[Installation Guide](docs/installation.md)**: JitPack dependency setup, Gradle configurations, and Android permissions.
+- **[Quickstart Guide](docs/quickstart.md)**: Complete runnable Kotlin code example.
 - **[Architecture & Turn State Machine](docs/architecture.md)**: Conceptual pipeline, thread model, and turn states.
 - **[Configuration Reference](docs/configuration.md)**: Complete parameter guide for VAD, ASR, LLM, TTS, and Audio.
+- **[Usage & Tool Calling](docs/usage.md)**: Registering on-device tools (`ToolDefinition`), memory trimming, and state persistence.
 - **[API Overview](docs/api/overview.md)**: Package structure and `S2SEvent` sealed event hierarchy.
 - **[Public Classes Reference](docs/api/classes.md)**: Specifications for `S2SEngine`, `ModelDownloader`, `ChatHistory`, etc.
 - **[Pipeline Interfaces](docs/api/interfaces.md)**: Abstractions for custom stage implementations (`AudioInput`, `SpeechRecognizer`, `LanguageModel`, `SpeechSynthesizer`).
+- **[Advanced Performance & Benchmarks](docs/advanced/performance.md)**: Memory footprint, thread budgeting, and battery benchmarks.
+- **[Troubleshooting & Diagnostics](docs/advanced/troubleshooting.md)**: Solutions for common runtime errors and VAD window mismatches.
 - **[Performance & Thermal Profiling](PERFORMANCE_AND_PROFILING.md)**: Memory footprint, thread budgeting, and battery benchmarks.
 - **[Privacy & Permissions Guide](PRIVACY_AND_PERMISSIONS.md)**: On-device privacy, Play Store Data Safety, and license compliance.
+
+---
+
+A Kotlin port of the pipeline design in [huggingface/speech-to-speech][hf], built on runtimes that are already native: sherpa-onnx (ONNX Runtime) for VAD/ASR/TTS, and llama.cpp for generation.
+
+[hf]: https://github.com/huggingface/speech-to-speech
 
 ## Layout
 
