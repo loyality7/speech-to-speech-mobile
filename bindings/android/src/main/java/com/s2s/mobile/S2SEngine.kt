@@ -540,7 +540,7 @@ class S2SEngine @JvmOverloads constructor(
         llmWorker.execute { generate(turn) }
     }
 
-    private fun generate(turn: Int) {
+    private fun generate(turn: Int, depth: Int = 0) {
         if (turns.isStale(turn)) return
 
         val toolPrompt = if (config.llm.toolsEnabled) tools.promptSection() else null
@@ -571,7 +571,7 @@ class S2SEngine @JvmOverloads constructor(
                         if (config.llm.toolsEnabled) {
                             val call = tools.parse(full)
                             if (call != null) {
-                                runTool(turn, call.name, full)
+                                runTool(turn, call.name, full, depth)
                                 return
                             }
                             // Not a tool call after all: speak it now.
@@ -606,7 +606,14 @@ class S2SEngine @JvmOverloads constructor(
         }
     }
 
-    private fun runTool(turn: Int, name: String, raw: String) {
+    private fun runTool(turn: Int, name: String, raw: String, depth: Int = 0) {
+        if (depth >= MAX_TOOL_RECURSION_DEPTH) {
+            Log.w(TAG, "Tool recursion depth $depth reached max limit $MAX_TOOL_RECURSION_DEPTH for tool $name")
+            emit(S2SEvent.Error("Tool recursion depth exceeded maximum limit ($MAX_TOOL_RECURSION_DEPTH)"))
+            if (running) setState(S2SState.LISTENING)
+            return
+        }
+
         val call = tools.parse(raw) ?: return
         val result = tools.execute(call)
         emit(S2SEvent.ToolExecuted(name, result.output, result.isError))
@@ -623,7 +630,7 @@ class S2SEngine @JvmOverloads constructor(
         // user hearing silence after a successful action.
         history.addToolResult(name, result.output)
         chunker.reset()
-        llmWorker.execute { generate(turn) }
+        llmWorker.execute { generate(turn, depth + 1) }
     }
 
     private fun speak(turn: Int, sentence: String) {
@@ -684,6 +691,7 @@ class S2SEngine @JvmOverloads constructor(
 
     private companion object {
         const val TAG = "S2SEngine"
+        const val MAX_TOOL_RECURSION_DEPTH = 3
     }
 }
 
