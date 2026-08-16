@@ -216,14 +216,26 @@ class ModelDownloader(private val modelsDir: File) {
             onProgress(
                 ModelProgress(
                     spec.name,
-                    100,
-                    downloadedBytes,
-                    totalBytes,
+                    0,
+                    0L,
+                    tempFile.length(),
                     ModelProgress.Status.EXTRACTING,
                 ),
             )
             target.deleteRecursively()
-            extractTarBz2(tempFile, target)
+            val archiveSize = tempFile.length().coerceAtLeast(1L)
+            extractTarBz2(tempFile, target) { extractedBytes ->
+                val percent = ((extractedBytes * 100) / archiveSize).toInt().coerceIn(0, 99)
+                onProgress(
+                    ModelProgress(
+                        spec.name,
+                        percent,
+                        extractedBytes,
+                        archiveSize,
+                        ModelProgress.Status.EXTRACTING,
+                    ),
+                )
+            }
             tempFile.delete()
         } else {
             target.delete()
@@ -284,8 +296,16 @@ class ModelDownloader(private val modelsDir: File) {
         }
     }
 
-    private fun extractTarBz2(archive: File, destination: File) {
+    private fun extractTarBz2(
+        archive: File,
+        destination: File,
+        onProgress: (extractedBytes: Long) -> Unit,
+    ) {
         destination.mkdirs()
+        var totalExtractedBytes = 0L
+        var lastEmittedBytes = 0L
+        val buffer = ByteArray(1 shl 16)
+
         TarArchiveInputStream(
             BZip2CompressorInputStream(BufferedInputStream(archive.inputStream())),
         ).use { tar ->
@@ -308,9 +328,22 @@ class ModelDownloader(private val modelsDir: File) {
                     continue
                 }
                 out.parentFile?.mkdirs()
-                FileOutputStream(out).use { tar.copyTo(it, 1 shl 16) }
+                FileOutputStream(out).use { output ->
+                    while (true) {
+                        val read = tar.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        totalExtractedBytes += read
+                        // Throttle progress updates to every 64KB
+                        if (totalExtractedBytes - lastEmittedBytes >= 64 * 1024) {
+                            lastEmittedBytes = totalExtractedBytes
+                            onProgress(totalExtractedBytes)
+                        }
+                    }
+                }
             }
         }
+        onProgress(totalExtractedBytes)
     }
 
     private fun calculateSha256(file: File): String {
