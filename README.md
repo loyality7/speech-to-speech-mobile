@@ -17,9 +17,18 @@ graph LR
 
 ---
 
-A Kotlin port of the pipeline design in [huggingface/speech-to-speech][hf], built on runtimes that are already native: sherpa-onnx (ONNX Runtime) for VAD/ASR/TTS, and llama.cpp for generation.
+## Documentation
 
-[hf]: https://github.com/huggingface/speech-to-speech
+For full architectural specifications, API guides, and integration tutorials, explore the **[docs/](docs/README.md)** portal:
+
+- **[Getting Started Guide](docs/getting-started.md)**: Setup prerequisites, permissions, and minimal Activity setup.
+- **[Architecture & Turn State Machine](docs/architecture.md)**: Conceptual pipeline, thread model, and turn states.
+- **[Configuration Reference](docs/configuration.md)**: Complete parameter guide for VAD, ASR, LLM, TTS, and Audio.
+- **[API Overview](docs/api/overview.md)**: Package structure and `S2SEvent` sealed event hierarchy.
+- **[Public Classes Reference](docs/api/classes.md)**: Specifications for `S2SEngine`, `ModelDownloader`, `ChatHistory`, etc.
+- **[Pipeline Interfaces](docs/api/interfaces.md)**: Abstractions for custom stage implementations (`AudioInput`, `SpeechRecognizer`, `LanguageModel`, `SpeechSynthesizer`).
+- **[Performance & Thermal Profiling](PERFORMANCE_AND_PROFILING.md)**: Memory footprint, thread budgeting, and battery benchmarks.
+- **[Privacy & Permissions Guide](PRIVACY_AND_PERMISSIONS.md)**: On-device privacy, Play Store Data Safety, and license compliance.
 
 ## Layout
 
