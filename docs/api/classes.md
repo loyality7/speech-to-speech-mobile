@@ -25,11 +25,11 @@ class S2SEngine(
 
 ### Key Methods
 
-- **`initialize(): Result<Unit>`**: Initializes all pipeline models (ASR, LLM, TTS, VAD). Must be called off the UI main thread.
+- **`suspend initialize(): Result<Unit>`**: Loads every model (VAD, ASR, LLM, TTS). Suspends and switches to `Dispatchers.IO` itself, so callers do not need to wrap it — it reads roughly 800 MB from disk and used to ANR when a caller forgot.
 - **`start()`**: Starts microphone listening and begins turn processing. Requires `RECORD_AUDIO` permission.
 - **`stop()`**: Stops microphone capture and resets state to `IDLE`.
 - **`release()`**: Releases native C++ resources (llama.cpp context, ONNX sessions) and shuts down background worker threads.
-- **`registerTool(definition: ToolDefinition, handler: ToolHandler)`**: Registers an on-device function calling tool.
+- **`registerTool(definition: ToolDefinition, function: ToolFunction)`**: Registers an on-device function calling tool.
 - **`onTrimMemory(level: Int)`**: Trims non-essential KV cache buffers under OS memory pressure.
 - **`saveConversationState(): String`**: Serializes active chat history to JSON string.
 - **`restoreConversationState(json: String)`**: Restores conversation turns from JSON string.

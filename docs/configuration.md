@@ -50,10 +50,10 @@ Configures `llama.cpp` inference parameters:
 
 ```kotlin
 data class LlmConfig(
-    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    val systemPrompt: String = "Talk Freely, but don't be rude. You are a helpful assistant.",
     val temperature: Float = 0.7f,
-    val maxTokens: Int = 512,
-    val topP: Float = 0.9f,
+    val maxTokens: Int = 256,
+    val topP: Float = 0.95f,
     val topK: Int = 40,
     val repeatPenalty: Float = 1.1f,
     val contextLength: Int = 2048,
@@ -71,7 +71,7 @@ Configures text-to-speech synthesis engine:
 ```kotlin
 data class TtsConfig(
     val backend: TtsBackend = TtsBackend.KOKORO, // KOKORO or PIPER
-    val speed: Float = 1.0f,                    // Playback speed rate
+    val speed: Float = 1.05f,                    // Playback speed rate
     val sid: Int = 0                            // Speaker ID index for multi-speaker models
 )
 ```
