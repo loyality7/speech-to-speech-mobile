@@ -192,7 +192,12 @@ class LlamaLanguageModel(
 
             val callback = object : GenStream {
                 override fun onDelta(text: String) {
-                    val decoded = utf8Decoder.decodeChunk(text)
+                    val decoded = try {
+                        utf8Decoder.decodeChunk(text)
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "UTF-8 streaming decode exception caught: ${e.message}", e)
+                        text
+                    }
                     if (decoded.isEmpty()) return
 
                     generated.append(decoded)
