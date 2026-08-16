@@ -24,6 +24,15 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun testAllRegistrySpecsHaveSha256() {
+        val models = ModelRegistry.ALL_MODELS
+        assertTrue(models.isNotEmpty())
+        for (spec in models) {
+            assertTrue("Model ${spec.id} missing sha256 checksum", !spec.sha256.isNullOrBlank())
+        }
+    }
+
+    @Test
     fun testPresentValidationForMissingFile() {
         val dir = tempFolder.newFolder("models")
         val downloader = ModelDownloader(dir)
