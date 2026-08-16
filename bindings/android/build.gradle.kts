@@ -36,15 +36,28 @@ afterEvaluate {
         publications {
             create<MavenPublication>("release") {
                 from(components["release"])
+                // JitPack builds from a git tag and derives the group from the
+                // repository owner, so consumers resolve
+                //   com.github.loyality7:speech-to-speech-mobile:<tag>
+                // No repositories block: JitPack runs publishToMavenLocal and
+                // collects the artifact from there. Declaring a local directory
+                // repository, as an earlier version did, only wrote into build/
+                // and left nothing anyone could resolve.
                 groupId = "com.github.loyality7"
                 artifactId = "speech-to-speech-mobile"
-                version = "1.0.0"
-            }
-        }
-        repositories {
-            maven {
-                name = "buildDir"
-                url = uri(layout.buildDirectory.dir("repo"))
+                version = project.findProperty("VERSION_NAME")?.toString() ?: "1.0.0"
+
+                pom {
+                    name.set("speech-to-speech-mobile")
+                    description.set("On-device speech-to-speech for Android: VAD, ASR, LLM and TTS with nothing leaving the device.")
+                    url.set("https://github.com/loyality7/speech-to-speech-mobile")
+                    licenses {
+                        license {
+                            name.set("The Apache License, Version 2.0")
+                            url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                        }
+                    }
+                }
             }
         }
     }
