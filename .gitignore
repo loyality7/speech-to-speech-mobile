@@ -26,6 +26,7 @@ Debug/
 *.txt
 !CMakeLists.txt
 GOAL.txt
+TOP_3_OPTIMIZATIONS.txt
 
 # Model binaries and weights
 *.onnx

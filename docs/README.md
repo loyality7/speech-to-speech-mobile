@@ -6,22 +6,22 @@ Welcome to the official developer documentation portal for the `speech-to-speech
 
 ## Complete Documentation Directory
 
-### 🚀 Getting Started & Setup
+### Getting Started & Setup
 - **[Getting Started Guide](getting-started.md)**: Setup prerequisites, permissions, and initial Activity setup.
 - **[Installation Guide](installation.md)**: JitPack dependency setup, Gradle configurations, and Android permissions.
 - **[Quickstart Guide](quickstart.md)**: Complete runnable Kotlin code example.
 
-### 🏗️ Architecture & Configuration
+### Architecture & Configuration
 - **[SDK Architecture](architecture.md)**: System pipeline diagram, `S2SState` turn state machine, thread budgeting (`S2S-Llm`, `S2S-Tts`), and safety guards.
 - **[Configuration Reference](configuration.md)**: Complete parameter reference for `S2SConfig`, `ModelPaths`, `VadConfig`, `LlmConfig`, `TtsConfig`, and `AudioConfig`.
 - **[Usage & Tool Calling](usage.md)**: Registering on-device tools (`ToolDefinition`), memory trimming (`onTrimMemory`), and conversation state serialization.
 
-### 📚 API Specifications
+### API Specifications
 - **[API Overview](api/overview.md)**: Package structure and `S2SEvent` sealed event hierarchy.
 - **[Public Classes Reference](api/classes.md)**: Complete specifications for `S2SEngine`, `ModelDownloader`, `VoiceSessionService`, `ChatHistory`, and `Utf8StreamDecoder`.
 - **[Pipeline Interfaces](api/interfaces.md)**: Modular stage abstractions (`AudioInput`, `SpeechRecognizer`, `LanguageModel`, `SpeechSynthesizer`, `AudioOutput`).
 
-### 🔬 Advanced Guides & Performance
+### Advanced Guides & Performance
 - **[Advanced Performance & Benchmarks](advanced/performance.md)**: Memory footprint, thread budgeting, active battery draw, and thermal growth profile.
 - **[Troubleshooting & Diagnostics](advanced/troubleshooting.md)**: Solutions for common runtime errors, VAD window mismatches, and permissions.
 - **[Performance & Profiling Guide](../PERFORMANCE_AND_PROFILING.md)**: Deep thermal profiling curves and battery discharge rates.
