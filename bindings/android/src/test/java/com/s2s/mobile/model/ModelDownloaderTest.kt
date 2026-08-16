@@ -57,4 +57,36 @@ class ModelDownloaderTest {
         assertTrue(downloader.present(spec))
         assertTrue(downloader.missing(listOf(spec)).isEmpty())
     }
+
+    @Test
+    fun testDiskUsageAndModelDeletion() = kotlinx.coroutines.runBlocking {
+        val dir = tempFolder.newFolder("models")
+        val file = File(dir, "test.bin")
+        val content = ByteArray(2048)
+        file.writeBytes(content)
+
+        val downloader = ModelDownloader(dir)
+        val spec = ModelSpec(
+            id = "test_spec",
+            name = "Test Model",
+            url = "http://localhost/test.bin",
+            targetPath = "test.bin",
+            archive = false,
+            approxBytes = 2000L,
+        )
+
+        assertEquals(2048L, downloader.diskUsage(spec))
+        assertEquals(2048L, downloader.totalDiskUsage())
+
+        val installed = downloader.getInstalledModels(listOf(spec))
+        assertEquals(1, installed.size)
+        assertTrue(installed[0].isInstalled)
+        assertEquals(2048L, installed[0].diskUsageBytes)
+
+        val deleted = downloader.deleteModel(spec)
+        assertTrue(deleted)
+        assertFalse(file.exists())
+        assertEquals(0L, downloader.diskUsage(spec))
+        assertEquals(0L, downloader.totalDiskUsage())
+    }
 }

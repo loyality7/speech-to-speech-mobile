@@ -33,6 +33,46 @@ class ModelDownloader(private val modelsDir: File) {
         }
     }
 
+    /** Deletes a specific model bundle from disk. */
+    suspend fun deleteModel(spec: ModelSpec): Boolean = withContext(Dispatchers.IO) {
+        val target = File(modelsDir, spec.targetPath)
+        if (!target.exists()) return@withContext true
+        if (target.isDirectory) {
+            target.deleteRecursively()
+        } else {
+            target.delete()
+        }
+    }
+
+    /** Calculates exact disk space in bytes used by a model (file or extracted archive directory). */
+    fun diskUsage(spec: ModelSpec): Long {
+        val target = File(modelsDir, spec.targetPath)
+        if (!target.exists()) return 0L
+        return if (target.isDirectory) {
+            target.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        } else {
+            target.length()
+        }
+    }
+
+    /** Total disk space in bytes used by all files in the models directory. */
+    fun totalDiskUsage(): Long {
+        if (!modelsDir.exists()) return 0L
+        return modelsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    /** Returns disk accounting and installation status for every known model specification. */
+    fun getInstalledModels(allSpecs: List<ModelSpec> = ModelRegistry.ALL_MODELS): List<InstalledModelInfo> {
+        return allSpecs.map { spec ->
+            InstalledModelInfo(
+                spec = spec,
+                isInstalled = present(spec),
+                diskUsageBytes = diskUsage(spec),
+                targetFile = File(modelsDir, spec.targetPath),
+            )
+        }
+    }
+
     fun missing(specs: List<ModelSpec> = ModelRegistry.DEFAULT_STACK): List<ModelSpec> =
         specs.filterNot { present(it) }
 

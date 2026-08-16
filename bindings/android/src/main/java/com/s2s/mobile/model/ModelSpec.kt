@@ -47,3 +47,13 @@ data class ModelProgress(
         FAILED
     }
 }
+
+/**
+ * On-disk status and disk accounting info for a model specification.
+ */
+data class InstalledModelInfo(
+    val spec: ModelSpec,
+    val isInstalled: Boolean,
+    val diskUsageBytes: Long,
+    val targetFile: java.io.File,
+)
