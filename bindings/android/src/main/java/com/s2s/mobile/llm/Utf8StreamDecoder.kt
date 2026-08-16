@@ -8,6 +8,11 @@ import java.nio.charset.StandardCharsets
 /**
  * Stream decoder that safely handles multi-byte UTF-8 characters and surrogate pairs
  * split across streaming token boundaries (e.g. 4-byte emojis like 😊 or smart quotes).
+ *
+ * Note on Issue #46: Stream decoding in Kotlin operates on String tokens emitted by
+ * the Llamatik JNI layer. Native C++ JNI aborts in NewStringUTF if a 4-byte UTF-8 sequence
+ * is split prior to JVM string instantiation; full resolution requires upstream C++ JNI
+ * handling in Llamatik (using env->NewString for UTF-16 jchar arrays).
  */
 class Utf8StreamDecoder {
 
