@@ -40,6 +40,7 @@ class SpeakerOutput(
     override fun start() {
         if (running) return
         routeToLoudspeaker()
+        Log.i(TAG, "SpeakerOutput initialized with AudioTrack sampleRate = $sampleRate Hz")
 
         val minBuffer = AudioTrack.getMinBufferSize(
             sampleRate,

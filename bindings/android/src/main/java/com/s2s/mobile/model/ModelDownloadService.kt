@@ -67,8 +67,16 @@ class ModelDownloadService : Service() {
             try {
                 downloader.downloadAll(specs) { p ->
                     _downloadState.value = DownloadState.Progress(p)
+                    val action = when (p.status) {
+                        ModelProgress.Status.PRECHECK -> "Preparing"
+                        ModelProgress.Status.DOWNLOADING -> "Downloading"
+                        ModelProgress.Status.VERIFYING -> "Verifying"
+                        ModelProgress.Status.EXTRACTING -> "Extracting"
+                        ModelProgress.Status.COMPLETED -> "Completed"
+                        ModelProgress.Status.FAILED -> "Failed"
+                    }
                     updateNotification(
-                        title = "Downloading ${p.modelName}",
+                        title = "$action ${p.modelName}",
                         progress = p.percent,
                     )
                 }
