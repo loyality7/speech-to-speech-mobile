@@ -1,0 +1,6 @@
+# JitPack builds this repo from a git tag. Android Gradle Plugin 8.x needs JDK 17,
+# and only the library module is published — the demo app is not consumable.
+jdk:
+  - openjdk17
+install:
+  - ./gradlew :bindings:android:publishToMavenLocal -PVERSION_NAME=$VERSION
