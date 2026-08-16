@@ -78,7 +78,7 @@ private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
  *
  * `RECORD_AUDIO` must be granted before [start].
  */
-class S2SEngine(
+class S2SEngine @JvmOverloads constructor(
     private val context: Context,
     private val config: S2SConfig,
     private val vad: VoiceActivityDetector = defaultVad(config),
@@ -109,7 +109,11 @@ class S2SEngine(
     private val _state = MutableStateFlow(S2SState.IDLE)
     val state: StateFlow<S2SState> = _state.asStateFlow()
 
-    private val _events = MutableSharedFlow<S2SEvent>(extraBufferCapacity = 64)
+    private val _events = MutableSharedFlow<S2SEvent>(
+        replay = 0,
+        extraBufferCapacity = 256,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     val events: SharedFlow<S2SEvent> = _events.asSharedFlow()
 
     @Volatile private var initialized = false
