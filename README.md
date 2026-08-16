@@ -90,7 +90,7 @@ models/tts/                 extracted sherpa TTS bundle
 models/model.gguf           any instruct-tuned GGUF
 ```
 
-## Latency
+## Latency & Performance
 
 Measured per turn from the end of the user's speech and logged as
 `turn latency: first token Xms, first audio Yms`.
@@ -99,6 +99,8 @@ Recognition runs *while* the user is speaking, so the transcript is already
 decoded when the endpointer fires — there is no transcription wait in the
 response path. Generation is chunked at clause boundaries so the first phrase is
 synthesised while the rest is still being written.
+
+For full battery discharge rates, CPU thermal profiling, and memory footprint benchmarks during sustained multi-minute sessions, see **[PERFORMANCE_AND_PROFILING.md](PERFORMANCE_AND_PROFILING.md)**.
 
 ## Tests
 
