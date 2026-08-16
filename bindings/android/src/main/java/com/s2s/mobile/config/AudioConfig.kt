@@ -27,6 +27,9 @@ data class AudioConfig(
     /** Notification title while listening. Shown by the foreground service. */
     val serviceNotificationTitle: String = "Listening",
     val serviceNotificationText: String = "Voice assistant is active",
+    /** Notification title while paused for audio focus loss. */
+    val serviceNotificationPausedTitle: String = "Paused",
+    val serviceNotificationPausedText: String = "Audio focus taken by another app",
     /**
      * Hold audio focus while listening, and yield to calls and alarms.
      *

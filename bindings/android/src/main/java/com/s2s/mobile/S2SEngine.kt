@@ -289,6 +289,13 @@ class S2SEngine(
         // Release the track so the other app gets a clean audio path; start()
         // rebuilds it, and routing is restored with it.
         speaker?.release()
+        if (config.audio.manageForegroundService) {
+            VoiceSessionService.update(
+                context,
+                config.audio.serviceNotificationPausedTitle,
+                config.audio.serviceNotificationPausedText,
+            )
+        }
         setState(S2SState.IDLE)
     }
 
@@ -303,6 +310,13 @@ class S2SEngine(
             emit(S2SEvent.Error("Microphone did not come back after the interruption"))
             stop()
             return
+        }
+        if (config.audio.manageForegroundService) {
+            VoiceSessionService.update(
+                context,
+                config.audio.serviceNotificationTitle,
+                config.audio.serviceNotificationText,
+            )
         }
         setState(S2SState.LISTENING)
     }

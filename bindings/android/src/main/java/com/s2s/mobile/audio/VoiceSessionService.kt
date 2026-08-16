@@ -110,6 +110,9 @@ class VoiceSessionService : Service() {
             false
         }
 
+        fun update(context: Context, title: String?, text: String?): Boolean =
+            start(context, title, text)
+
         fun stop(context: Context) {
             runCatching { context.stopService(Intent(context, VoiceSessionService::class.java)) }
                 .onFailure { Log.w(TAG, "stopService failed", it) }
