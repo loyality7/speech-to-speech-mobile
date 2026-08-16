@@ -19,7 +19,7 @@ class SentenceChunker(
 ) : TextChunker {
 
     private val buffer = StringBuilder()
-    private var emittedAny = false
+    private var emittedCount = 0
 
     override fun accept(token: String): List<String> {
         if (token.isEmpty()) return emptyList()
@@ -32,7 +32,7 @@ class SentenceChunker(
             buffer.delete(0, cut)
             if (sentence.isNotEmpty()) {
                 out += sentence
-                emittedAny = true
+                emittedCount++
             }
         }
         return out
@@ -41,13 +41,13 @@ class SentenceChunker(
     override fun flush(): String? {
         val rest = buffer.toString().trim()
         buffer.setLength(0)
-        if (rest.isNotEmpty()) emittedAny = true
+        if (rest.isNotEmpty()) emittedCount++
         return rest.ifEmpty { null }
     }
 
     override fun reset() {
         buffer.setLength(0)
-        emittedAny = false
+        emittedCount = 0
     }
 
     /**
@@ -59,7 +59,7 @@ class SentenceChunker(
      * playing and a runt chunk only risks a gap.
      */
     private fun floor(): Int =
-        if (emittedAny) minChunkChars else minOf(firstChunkMinChars, minChunkChars)
+        if (emittedCount > 0) minChunkChars else minOf(firstChunkMinChars, minChunkChars)
 
     /** Index just past the end of the first complete sentence, or null. */
     private fun findCut(text: CharSequence): Int? {
@@ -101,7 +101,16 @@ class SentenceChunker(
         // whole remaining sentence in one call means the listener hears a short
         // burst, a gap, then the rest arriving in a lump. Capped chunks keep audio
         // arriving steadily while the next one is already being synthesised.
-        val threshold = if (emittedAny) maxChunkChars else firstChunkMinChars
+        //
+        // RAMP THE CAP (Issue #40):
+        // Chunk 1 = firstChunkMinChars (fast first audio)
+        // Chunk 2 = smooth transition cap (~40 chars)
+        // Chunk 3+ = full maxChunkChars
+        val threshold = when (emittedCount) {
+            0 -> firstChunkMinChars
+            1 -> minOf(maxOf(firstChunkMinChars * 2, 40), maxChunkChars)
+            else -> maxChunkChars
+        }
         if (text.length >= threshold) {
             val clause = text.indexOfFirst { it == ',' || it == ';' || it == ':' }
             if (clause >= 0 && clause < threshold && clause + 1 >= floor) return clause + 1

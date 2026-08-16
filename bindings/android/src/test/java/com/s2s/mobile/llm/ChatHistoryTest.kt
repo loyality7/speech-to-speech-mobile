@@ -1,0 +1,93 @@
+package com.s2s.mobile.llm
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.concurrent.CountDownLatch
+
+class ChatHistoryTest {
+
+    @Test
+    fun testBasicMessageFlow() {
+        val history = ChatHistory("System initial", keepTurns = 6)
+        history.addUser("Hello assistant")
+        history.addAssistant("Hello user")
+
+        val messages = history.messages()
+        assertEquals(3, messages.size)
+        assertEquals("system", messages[0].role)
+        assertEquals("System initial", messages[0].content)
+        assertEquals("user", messages[1].role)
+        assertEquals("Hello assistant", messages[1].content)
+        assertEquals("assistant", messages[2].role)
+        assertEquals("Hello user", messages[2].content)
+    }
+
+    @Test
+    fun testReplaceLastUser() {
+        val history = ChatHistory("System prompt")
+        history.addUser("Hello I am thinking...")
+        history.replaceLastUser("Hello I am thinking about weather.")
+
+        val messages = history.messages()
+        assertEquals(2, messages.size)
+        assertEquals("Hello I am thinking about weather.", messages[1].content)
+    }
+
+    @Test
+    fun testToolResultFormatting() {
+        val history = ChatHistory("System prompt")
+        history.addToolResult("get_weather", "Sunny 25C")
+
+        val messages = history.messages()
+        assertEquals(2, messages.size)
+        assertEquals("user", messages[1].role)
+        assertEquals("[tool get_weather returned] Sunny 25C", messages[1].content)
+    }
+
+    @Test
+    fun testCompactionRollingWindow() {
+        // keepTurns = 2 -> max turns before compaction = 4
+        val history = ChatHistory("System prompt", keepTurns = 2, compact = true)
+        
+        for (i in 1..5) {
+            history.addUser("User message $i")
+            history.addAssistant("Assistant response $i")
+        }
+
+        val messages = history.messages()
+        // Should contain System prompt + System summary + 4 retained turn messages (2 turns)
+        assertTrue(messages.any { it.role == "system" && it.content.contains("Earlier in this conversation:") })
+        assertEquals(6, messages.size) // 1 system, 1 summary system, 4 verbatim messages
+    }
+
+    @Test
+    fun testClear() {
+        val history = ChatHistory("System prompt")
+        history.addUser("Hello")
+        history.addAssistant("Hi")
+        history.clear()
+
+        val messages = history.messages()
+        assertEquals(1, messages.size)
+        assertEquals("System prompt", messages[0].content)
+    }
+
+    @Test
+    fun testThreadSafety() {
+        val history = ChatHistory("System prompt")
+        val latch = CountDownLatch(10)
+
+        for (i in 1..10) {
+            Thread {
+                history.addUser("User $i")
+                history.addAssistant("Assistant $i")
+                history.messages()
+                latch.countDown()
+            }.start()
+        }
+
+        latch.await()
+        assertTrue(history.messages().isNotEmpty())
+    }
+}
