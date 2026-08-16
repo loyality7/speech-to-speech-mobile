@@ -170,10 +170,14 @@ class LlamaLanguageModel(
             // Trimmed, so it compares equal to whatever the engine commits.
             cacheTail = outgoing.lastOrNull()?.content?.trim() ?: cacheTail
             val generated = StringBuilder()
+            val utf8Decoder = Utf8StreamDecoder()
 
             val callback = object : GenStream {
                 override fun onDelta(text: String) {
-                    generated.append(text)
+                    val decoded = utf8Decoder.decodeChunk(text)
+                    if (decoded.isEmpty()) return
+
+                    generated.append(decoded)
                     if (first) {
                         first = false
                         Log.i(
@@ -183,10 +187,15 @@ class LlamaLanguageModel(
                                 "first token ${System.currentTimeMillis() - built}ms after submit",
                         )
                     }
-                    sink.onToken(text)
+                    sink.onToken(decoded)
                 }
 
                 override fun onComplete() {
+                    val tail = utf8Decoder.flush()
+                    if (tail.isNotEmpty()) {
+                        generated.append(tail)
+                        sink.onToken(tail)
+                    }
                     cacheTail = generated.toString().trim().ifBlank { cacheTail }
                     sink.onComplete()
                 }
