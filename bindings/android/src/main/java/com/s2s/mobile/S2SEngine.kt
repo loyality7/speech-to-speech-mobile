@@ -109,11 +109,12 @@ class S2SEngine @JvmOverloads constructor(
     private val _state = MutableStateFlow(S2SState.IDLE)
     val state: StateFlow<S2SState> = _state.asStateFlow()
 
-    private val _events = MutableSharedFlow<S2SEvent>(
-        replay = 0,
-        extraBufferCapacity = 256,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-    )
+    // 256 rather than 64 because one event per token overruns a slow collector
+    // quickly. Deliberately NOT DROP_OLDEST: that makes tryEmit always succeed,
+    // so overflow becomes undetectable and tokens vanish silently — which is the
+    // whole of issue #17. With the default strategy tryEmit reports the failure
+    // and emit() below can say so.
+    private val _events = MutableSharedFlow<S2SEvent>(extraBufferCapacity = 256)
     val events: SharedFlow<S2SEvent> = _events.asSharedFlow()
 
     @Volatile private var initialized = false
@@ -174,6 +175,18 @@ class S2SEngine @JvmOverloads constructor(
     }
 
     private fun loadStages() {
+        // The detector is trained on a fixed window — Silero 512 samples, TEN 256 —
+        // and a mismatch does not throw: the native side simply scores the wrong
+        // shape and barge-in behaves oddly. ModelConfigFactory derives the capture
+        // size from the backend so this should hold by construction; this catches
+        // a hand-built config that got it wrong.
+        check(microphone.frameSize == vad.frameSize) {
+            "Capture frame size ${microphone.frameSize} does not match the " +
+                "${config.vad.backend} VAD window of ${vad.frameSize} samples. " +
+                "Set AudioConfig.frameSize to ${vad.frameSize}, or build the config " +
+                "with ModelConfigFactory, which derives it from the backend."
+        }
+
         vad.initialize().getOrThrow()
         recognizer.initialize().getOrThrow()
         synthesizer.initialize().getOrThrow()

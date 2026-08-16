@@ -23,8 +23,8 @@ class TenVad(
 
     private var vad: Vad? = null
 
-    /** TEN VAD uses 256-sample windows at 16 kHz. */
-    override val frameSize: Int get() = 256
+    /** Taken from the backend so capture, VAD and recogniser cannot disagree. */
+    override val frameSize: Int get() = vadConfig.backend.windowSize
 
     override fun initialize(): Result<Unit> = runCatching {
         val model = File(modelPath)

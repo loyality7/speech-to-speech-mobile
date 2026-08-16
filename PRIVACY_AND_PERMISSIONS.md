@@ -43,13 +43,37 @@ The SDK core is published under the **Apache License 2.0**. Native runtime depen
 | :--- | :--- | :--- | :--- |
 | **SDK Core** | `com.s2s.mobile` | Apache 2.0 | Permissive commercial redistribution. |
 | **LLM Runtime** | `llama.cpp` / `Llamatik` | MIT | Permissive MIT open-source license. |
-| **Speech Pipeline** | `sherpa-onnx` | Apache 2.0 | Permissive ONNX inference engine. |
+| **Speech Pipeline** | `sherpa-onnx` | Apache 2.0 | Apache-2.0 itself, **but its shipped `.so` has GPL-3.0 espeak-ng linked in — see the note below.** |
 | **VAD Backend** | `Silero VAD v5` / `TEN VAD` | MIT / Apache 2.0 | Permissive neural VAD models. |
 | **Acoustic TTS** | `Kokoro` / `Piper` ONNX | Apache 2.0 / MIT | ONNX neural voice bundles. |
 
-> [!IMPORTANT]
-> **GPL-3.0 Compliance Audit Note (`Issue #27`)**:
-> Legacy TTS backends (e.g., standalone `espeak-ng` binaries) under GPL-3.0 are **excluded** from the production SDK runtime bundle. The SDK exclusively uses pre-compiled ONNX neural synthesis graph models (`sherpa-onnx`) operating under Apache 2.0 / MIT licenses, ensuring full compliance for commercial closed-source applications without GPL copyleft infection.
+> [!WARNING]
+> **GPL-3.0 is present in the shipped binary — issue [#27](https://github.com/loyality7/speech-to-speech-mobile/issues/27) is OPEN.**
+>
+> An earlier version of this document stated that espeak-ng was excluded and that
+> the SDK was safe for closed-source commercial use. **That was incorrect and has
+> been withdrawn.** Do not rely on it.
+>
+> espeak-ng (GPL-3.0) is **statically compiled into `libsherpa-onnx-jni.so`**, the
+> library this SDK links against. Verified in the shipped 1.13.5 binary, which
+> contains espeak-ng's own data-file names (`phondata`, `phontab`, `phonindex`,
+> `intonations`) and the espeak-ng source string `"Could not load the mbrola.dll file"`.
+> Every Piper and Kokoro bundle additionally ships an `espeak-ng-data/` directory.
+>
+> Two consequences that are easy to get wrong:
+>
+> 1. **Choosing a different TTS model does not avoid it.** Kokoro, Piper, Kitten and
+>    Matcha all live in that same library. The obligation attaches to distributing
+>    the linked binary, not to whether espeak-ng is called.
+> 2. **"Standalone binaries are excluded" is not a defence.** We do not ship an
+>    `espeak` executable; we ship a library with espeak-ng linked into it, which is
+>    precisely the case GPL-3.0 covers.
+>
+> sherpa-onnx is removing espeak-ng in 2.0.0
+> ([k2-fsa/sherpa-onnx#3731](https://github.com/k2-fsa/sherpa-onnx/pull/3731)) —
+> explicitly because of this licence conflict. Adopting that release, or obtaining
+> legal sign-off, is what will close #27. Until then, treat closed-source
+> distribution as an unresolved question and take your own advice on it.
 
 ---
 

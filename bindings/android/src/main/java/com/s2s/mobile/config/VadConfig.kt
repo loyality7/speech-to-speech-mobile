@@ -1,8 +1,14 @@
 package com.s2s.mobile.config
 
-enum class VadBackend {
-    SILERO,
-    TEN,
+/**
+ * [windowSize] is the frame length the detector is trained on, in samples at
+ * 16 kHz. It lives on the backend because the microphone, the VAD and the
+ * recogniser all have to agree on it — when they did not, TEN VAD silently
+ * received 512-sample frames and misbehaved rather than failing.
+ */
+enum class VadBackend(val windowSize: Int) {
+    SILERO(512),
+    TEN(256),
 }
 
 /**

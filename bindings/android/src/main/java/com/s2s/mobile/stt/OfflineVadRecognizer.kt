@@ -15,6 +15,7 @@ import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.s2s.mobile.config.AudioConfig
 import com.s2s.mobile.config.SttBackend
 import com.s2s.mobile.config.SttConfig
+import com.s2s.mobile.config.VadBackend
 import com.s2s.mobile.config.VadConfig
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.Transcript
@@ -58,31 +59,31 @@ class OfflineVadRecognizer(
         require(dir.isDirectory) { "STT model directory not found: ${dir.absolutePath}" }
 
         val vadModel = File(vadModelPath)
-        require(vadModel.isFile) { "Silero VAD model not found: ${vadModel.absolutePath}" }
+        require(vadModel.isFile) { "${vadConfig.backend} VAD model not found: ${vadModel.absolutePath}" }
 
         vad = Vad(
             config = when (vadConfig.backend) {
-                com.s2s.mobile.config.VadBackend.TEN -> VadModelConfig(
+                VadBackend.TEN -> VadModelConfig(
                     sileroVadModelConfig = SileroVadModelConfig(),
                     tenVadModelConfig = TenVadModelConfig(
                         vadModel.absolutePath,
                         vadConfig.threshold,
                         vadConfig.minSilenceSeconds,
                         vadConfig.minSpeechSeconds,
-                        256,
+                        vadConfig.backend.windowSize,
                         vadConfig.maxSpeechSeconds,
                     ),
                     sampleRate = audioConfig.sampleRate,
                     numThreads = 1,
                     provider = "cpu",
                 )
-                com.s2s.mobile.config.VadBackend.SILERO -> VadModelConfig(
+                VadBackend.SILERO -> VadModelConfig(
                     sileroVadModelConfig = SileroVadModelConfig(
                         vadModel.absolutePath,
                         vadConfig.threshold,
                         vadConfig.minSilenceSeconds,
                         vadConfig.minSpeechSeconds,
-                        audioConfig.frameSize,
+                        vadConfig.backend.windowSize,
                         vadConfig.maxSpeechSeconds,
                     ),
                     tenVadModelConfig = TenVadModelConfig(),
