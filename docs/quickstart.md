@@ -19,7 +19,6 @@ import com.s2s.mobile.config.ModelPaths
 import com.s2s.mobile.config.S2SConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 class VoiceActivity : AppCompatActivity() {
@@ -55,10 +54,9 @@ class VoiceActivity : AppCompatActivity() {
             }
         }
 
-        // Initialize engine on background thread
+        // initialize() suspends onto Dispatchers.IO itself — no wrapper needed.
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) { engine.initialize() }
-            if (result.isSuccess) {
+            if (engine.initialize().isSuccess) {
                 engine.start()
             }
         }
