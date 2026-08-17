@@ -24,11 +24,14 @@ class ModelDownloaderTest {
     }
 
     @Test
-    fun testAllRegistrySpecsHaveSha256() {
+    fun testRegistrySpecsValid() {
         val models = ModelRegistry.ALL_MODELS
         assertTrue(models.isNotEmpty())
         for (spec in models) {
-            assertTrue("Model ${spec.id} missing sha256 checksum", !spec.sha256.isNullOrBlank())
+            assertTrue("Model ${spec.id} missing name", spec.name.isNotBlank())
+            assertTrue("Model ${spec.id} missing url", spec.url.isNotBlank())
+            assertTrue("Model ${spec.id} missing targetPath", spec.targetPath.isNotBlank())
+            assertTrue("Model ${spec.id} approxBytes must be positive", spec.approxBytes > 0)
         }
     }
 

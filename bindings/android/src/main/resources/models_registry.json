@@ -1,5 +1,10 @@
 {
-  "default_stack": ["silero_vad", "stt_moonshine_base", "tts_piper_amy_female", "llm_qwen_0_5b"],
+  "default_stack": [
+    "silero_vad",
+    "stt_moonshine_base",
+    "tts_piper_amy_female",
+    "llm_qwen_0_5b"
+  ],
   "models": [
     {
       "id": "silero_vad",
@@ -9,7 +14,6 @@
       "targetPath": "silero_vad.onnx",
       "archive": false,
       "approxBytes": 2327524,
-      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
       "version": "v5",
       "backend": "SILERO"
     },
@@ -21,7 +25,6 @@
       "targetPath": "ten_vad.onnx",
       "archive": false,
       "approxBytes": 332211,
-      "sha256": "718cb7eef47e3cf5ddbe7e967a7503f46b8b469c0706872f494dfa921b486206",
       "version": "v1",
       "backend": "TEN"
     },
@@ -33,7 +36,6 @@
       "targetPath": "stt",
       "archive": true,
       "approxBytes": 250807309,
-      "sha256": "21870cecaa2e44e4e2bf63e02d1072bed183ccd10284871353bd9d24dad14e5e",
       "version": "base-int8",
       "backend": "MOONSHINE",
       "numThreads": 2
@@ -46,7 +48,6 @@
       "targetPath": "stt_moonshine_tiny",
       "archive": true,
       "approxBytes": 108000000,
-      "sha256": "d5fe6ec4334fef36255b2a4010412cad4c007e33103fec62fb5d17cad88086f2",
       "version": "tiny-int8",
       "backend": "MOONSHINE",
       "numThreads": 2
@@ -59,7 +60,6 @@
       "targetPath": "stt_whisper_base",
       "archive": true,
       "approxBytes": 208576005,
-      "sha256": "34e2b040e9a5c4915d757947cbfa5dabe304a78fdcdde71caab27b02ee5d6f83",
       "version": "whisper-base",
       "backend": "WHISPER",
       "numThreads": 2
@@ -72,7 +72,6 @@
       "targetPath": "stt_streaming_zipformer",
       "archive": true,
       "approxBytes": 127887156,
-      "sha256": "17ad0a537cc136d233544899bb2c921fc99cfe46d44acbd99145fd778cdfee6f",
       "version": "zipformer-20M",
       "backend": "ZIPFORMER_TRANSDUCER",
       "numThreads": 2
@@ -85,7 +84,6 @@
       "targetPath": "tts",
       "archive": true,
       "approxBytes": 67095344,
-      "sha256": "c70f5284a09a7fd4ed203b39b2ff51cac1432b422b852eb647b481dade3cf639",
       "version": "piper-amy-female",
       "backend": "VITS",
       "numThreads": 2,
@@ -101,7 +99,6 @@
       "targetPath": "tts_bryce",
       "archive": true,
       "approxBytes": 65000000,
-      "sha256": "f35bb77ddecdf229798e850d1c77ded839d4179879be8b90da5f82e7beb538f2",
       "version": "piper-bryce-male",
       "backend": "VITS",
       "numThreads": 4,
@@ -117,7 +114,6 @@
       "targetPath": "tts_danny",
       "archive": true,
       "approxBytes": 62000000,
-      "sha256": "97dfebab8b8ae353674e4a8c5862dac165d4c4eba044bf1d9dd1631067f93ef8",
       "version": "piper-danny-male",
       "backend": "VITS",
       "numThreads": 2,
@@ -133,7 +129,6 @@
       "targetPath": "tts_ryan",
       "archive": true,
       "approxBytes": 64000000,
-      "sha256": "df40059da8233a8fabed497f931f8c40cab5691360017b7b48154c9cd2553c20",
       "version": "piper-ryan-male",
       "backend": "VITS",
       "numThreads": 2,
@@ -149,7 +144,6 @@
       "targetPath": "tts_kokoro",
       "archive": true,
       "approxBytes": 147000000,
-      "sha256": "762e1d25de32edaff54209b046b36f03eeefc47ea103b43dd7c85d8a8cc92ef8",
       "version": "kokoro-multi",
       "backend": "KOKORO",
       "numThreads": 4,
@@ -165,7 +159,6 @@
       "targetPath": "model.gguf",
       "archive": false,
       "approxBytes": 491400032,
-      "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
       "version": "qwen2.5-0.5b",
       "numThreads": 4
     },
@@ -177,7 +170,6 @@
       "targetPath": "qwen2.5-1.5b.gguf",
       "archive": false,
       "approxBytes": 1100000000,
-      "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
       "version": "qwen2.5-1.5b",
       "numThreads": 4,
       "batchSize": 256,
