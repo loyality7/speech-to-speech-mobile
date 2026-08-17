@@ -33,7 +33,7 @@
       "targetPath": "stt",
       "archive": true,
       "approxBytes": 250807309,
-      "sha256": "a569b392daa4a18652f61cdd7eefe62f5d0292c983003b55fd717ef46f2871a2",
+      "sha256": "21870cecaa2e44e4e2bf63e02d1072bed183ccd10284871353bd9d24dad14e5e",
       "version": "base-int8",
       "backend": "MOONSHINE",
       "numThreads": 2
@@ -46,7 +46,7 @@
       "targetPath": "stt_moonshine_tiny",
       "archive": true,
       "approxBytes": 108000000,
-      "sha256": "23754660a1032bf8cfede72de00cfa934b75300049ea0684c3ae44c50d2a9dd5",
+      "sha256": "d5fe6ec4334fef36255b2a4010412cad4c007e33103fec62fb5d17cad88086f2",
       "version": "tiny-int8",
       "backend": "MOONSHINE",
       "numThreads": 2
