@@ -147,7 +147,7 @@ class SherpaSynthesizer(
         model = pickModel(dir),
         voices = required(dir, "voices.bin"),
         tokens = required(dir, "tokens.txt"),
-        dataDir = required(dir, "espeak-ng-data"),
+        dataDir = optionalDir(dir, "espeak-ng-data"),
         // Multilingual bundles add lexicon files; pick lexicon-us-en.txt or first matching lexicon
         lexicon = lexiconKokoro(dir),
         dictDir = optionalDir(dir, "dict"),
@@ -180,7 +180,7 @@ class SherpaSynthesizer(
         model = pickModel(dir),
         voices = required(dir, "voices.bin"),
         tokens = required(dir, "tokens.txt"),
-        dataDir = required(dir, "espeak-ng-data"),
+        dataDir = optionalDir(dir, "espeak-ng-data"),
         lengthScale = 1f / config.speed,
     )
 
