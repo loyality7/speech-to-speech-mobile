@@ -7,6 +7,7 @@ import com.s2s.mobile.audio.MicrophoneInput
 import com.s2s.mobile.audio.SpeakerOutput
 import com.s2s.mobile.audio.VoiceSessionService
 import com.s2s.mobile.config.S2SConfig
+import com.s2s.mobile.internal.BargeInGate
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.llm.ChatHistory
 import com.s2s.mobile.llm.LlamaLanguageModel
@@ -99,6 +100,7 @@ class S2SEngine @JvmOverloads constructor(
     )
 
     private val turns = TurnGuard()
+    private val bargeInGate = BargeInGate(config.vad.bargeInFrames, config.vad.bargeInGraceMs)
     private var speaker: AudioOutput? = null
 
     // Generation and synthesis run on separate threads so sentence two is being
@@ -484,7 +486,8 @@ class S2SEngine @JvmOverloads constructor(
             // audio can never be transcribed back as if the user had said it.
             S2SState.SPEAKING -> {
                 val speech = config.vad.bargeInEnabled && vad.accept(frame)
-                if (speech && System.currentTimeMillis() - speakingSince >= config.vad.bargeInGraceMs) {
+                val elapsed = System.currentTimeMillis() - speakingSince
+                if (bargeInGate.onFrame(speech, elapsed)) {
                     emit(S2SEvent.BargeIn)
                     interrupt()
                 }
@@ -667,6 +670,7 @@ class S2SEngine @JvmOverloads constructor(
                 if (!sawFirstAudio) {
                     sawFirstAudio = true
                     speakingSince = System.currentTimeMillis()
+                    bargeInGate.reset()
                     val metrics = TurnMetrics(
                         timeToFirstTokenMs = firstTokenMs,
                         timeToFirstAudioMs = System.currentTimeMillis() - turnEndedAt,
