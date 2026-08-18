@@ -43,23 +43,31 @@ class HuggingFaceDownloaderTest {
 
         assertEquals("hf_qwen", spec.id)
         assertEquals("LLM", spec.category)
+        assertEquals(ModelSource.HUGGING_FACE, spec.source)
         assertEquals(
             "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
             spec.url
         )
         assertEquals("qwen2.5-0.5b-instruct-q4_k_m.gguf", spec.targetPath)
         assertEquals(491400032L, spec.approxBytes)
+        assertEquals(null, spec.sha256)
     }
 
     @Test
-    fun testSearchModelsInRegistry() {
-        val qwenResults = ModelRegistry.searchModels("qwen")
-        assertEquals(2, qwenResults.size)
-
-        val moonshineResults = ModelRegistry.searchModels("moonshine")
-        assertEquals(2, moonshineResults.size)
-
-        val ttsResults = ModelRegistry.searchModels("TTS")
-        assertEquals(5, ttsResults.size)
+    fun testCreateModelSpecWithSha256FromLfsOid() {
+        // Same integrity guarantee as a curated registry entry when HF exposes an
+        // LFS checksum — ModelDownloader hard-fails on mismatch for this the same
+        // way it does for a LOCAL spec.
+        val sha = "a".repeat(64)
+        val spec = HuggingFaceDownloader.createModelSpec(
+            id = "hf_qwen",
+            name = "Qwen 0.5B GGUF",
+            category = "LLM",
+            repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+            filename = "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+            approxBytes = 491400032L,
+            sha256 = sha,
+        )
+        assertEquals(sha, spec.sha256)
     }
 }

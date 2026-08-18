@@ -16,24 +16,11 @@ object ModelRegistry {
     val ALL_TTS_OPTIONS: List<ModelSpec> get() = ALL_MODELS.filter { it.category == "TTS" }
     val ALL_LLM_OPTIONS: List<ModelSpec> get() = ALL_MODELS.filter { it.category == "LLM" }
 
+    /** The default for each category, per the JSON's `default_stack`. */
     val DEFAULT_VAD: ModelSpec get() = defaultOf("VAD")
     val DEFAULT_STT: ModelSpec get() = defaultOf("STT")
     val DEFAULT_TTS: ModelSpec get() = defaultOf("TTS")
     val DEFAULT_LLM: ModelSpec get() = defaultOf("LLM")
-
-    /**
-     * Filters registered models by a search query string across name, id, category, or backend.
-     */
-    fun searchModels(query: String): List<ModelSpec> {
-        if (query.isBlank()) return ALL_MODELS
-        val q = query.trim().lowercase()
-        return ALL_MODELS.filter {
-            it.name.lowercase().contains(q) ||
-                it.id.lowercase().contains(q) ||
-                it.category.lowercase().contains(q) ||
-                (it.backend != null && it.backend.lowercase().contains(q))
-        }
-    }
 
     private fun defaultOf(category: String): ModelSpec =
         DEFAULT_STACK.firstOrNull { it.category == category }

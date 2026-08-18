@@ -26,9 +26,11 @@ import com.s2s.mobile.config.ModelConfigFactory
 import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.ModelDownloader
+import com.s2s.mobile.model.HuggingFaceDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
 import com.s2s.mobile.model.S2SModels
+import com.s2s.mobile.model.ModelSource
 import com.s2s.mobile.model.ModelSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +63,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var transcript: TextView
 
+    private var hfBrowseButtons: List<Button> = emptyList()
+
     private var selectedVad: ModelSpec = ModelRegistry.DEFAULT_VAD
     private var selectedStt: ModelSpec = ModelRegistry.DEFAULT_STT
     private var selectedTts: ModelSpec = ModelRegistry.DEFAULT_TTS
@@ -87,6 +91,7 @@ class MainActivity : Activity() {
         }
 
         setupSpinners()
+        restorePersistedCustomModels()
         toggle.setOnClickListener { onToggle() }
         downloadBtn.setOnClickListener { onDownloadOrStop() }
         clearBtn.setOnClickListener { onClearModels() }
@@ -184,16 +189,29 @@ class MainActivity : Activity() {
         llmSpinner = Spinner(this)
         voiceSpinner = Spinner(this)
 
-        selectionBox.addView(createLabel("VAD Model:"))
-        selectionBox.addView(vadSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        selectionBox.addView(createLabel("STT Model:"))
-        selectionBox.addView(sttSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        selectionBox.addView(createLabel("TTS Model:"))
-        selectionBox.addView(ttsSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        selectionBox.addView(createLabel("LLM Model:"))
-        selectionBox.addView(llmSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        val browseButtons = mutableListOf<Button>()
+        fun addModelRow(label: String, spinner: Spinner, category: String) {
+            selectionBox.addView(createLabel(label))
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(spinner, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            val browseBtn = Button(this).apply { text = "🔍 HF" }
+            browseBtn.setOnClickListener {
+                val intent = Intent(this, HuggingFaceBrowserActivity::class.java)
+                    .putExtra(HuggingFaceBrowserActivity.EXTRA_CATEGORY, category)
+                startActivityForResult(intent, REQ_HF_BROWSE)
+            }
+            browseButtons.add(browseBtn)
+            row.addView(browseBtn, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+            selectionBox.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+
+        addModelRow("VAD Model:", vadSpinner, "VAD")
+        addModelRow("STT Model:", sttSpinner, "STT")
+        addModelRow("TTS Model:", ttsSpinner, "TTS")
+        addModelRow("LLM Model:", llmSpinner, "LLM")
         selectionBox.addView(createLabel("TTS Voice / Speaker:"))
         selectionBox.addView(voiceSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        hfBrowseButtons = browseButtons
 
         root.addView(selectionBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
@@ -244,58 +262,79 @@ class MainActivity : Activity() {
         setPadding(0, 4, 0, 2)
     }
 
+    // Mutable per-category option lists. Start as the curated registry; a Hugging
+    // Face pick is appended here (see addAndSelect) so it actually shows up in the
+    // spinner instead of only living in selectedXxx — otherwise it's invisible in
+    // the dropdown, and touching the spinner again would silently discard it.
+    private val vadOptions = ModelRegistry.ALL_VAD_OPTIONS.toMutableList()
+    private val sttOptions = ModelRegistry.ALL_STT_OPTIONS.toMutableList()
+    private val ttsOptions = ModelRegistry.ALL_TTS_OPTIONS.toMutableList()
+    private val llmOptions = ModelRegistry.ALL_LLM_OPTIONS.toMutableList()
+
     private fun setupSpinners() {
-        vadSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            ModelRegistry.ALL_VAD_OPTIONS.map { it.name },
-        )
-        vadSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedVad = ModelRegistry.ALL_VAD_OPTIONS[position]
-                onModelSelectionChanged()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        bindSpinner(vadSpinner, vadOptions) { selectedVad = it }
+        bindSpinner(sttSpinner, sttOptions) { selectedStt = it }
+        bindSpinner(ttsSpinner, ttsOptions) { selectedTts = it }
+        bindSpinner(llmSpinner, llmOptions) { selectedLlm = it }
+    }
 
-        sttSpinner.adapter = ArrayAdapter(
+    private fun bindSpinner(spinner: Spinner, options: MutableList<ModelSpec>, onSelected: (ModelSpec) -> Unit) {
+        spinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            ModelRegistry.ALL_STT_OPTIONS.map { it.name },
+            options.map { it.name },
         )
-        sttSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedStt = ModelRegistry.ALL_STT_OPTIONS[position]
+                onSelected(options[position])
                 onModelSelectionChanged()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+    }
 
-        ttsSpinner.adapter = ArrayAdapter(
+    /** Appends a dynamically-resolved spec (Hugging Face pick) to a category's
+     * option list, refreshes that spinner, and selects the new entry. Persisted to
+     * SharedPreferences so the pick survives process death — otherwise a Hugging
+     * Face model you already downloaded vanishes from the dropdown on next launch
+     * and you'd have to re-search for it (the files themselves stay on disk either
+     * way; this is only about the SDK remembering which one you picked). */
+    private fun addAndSelect(spinner: Spinner, options: MutableList<ModelSpec>, spec: ModelSpec) {
+        options.removeAll { it.id == spec.id }
+        options.add(spec)
+        spinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            ModelRegistry.ALL_TTS_OPTIONS.map { it.name },
+            options.map { it.name },
         )
-        ttsSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedTts = ModelRegistry.ALL_TTS_OPTIONS[position]
-                onModelSelectionChanged()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        spinner.setSelection(options.size - 1)
+        if (spec.source == ModelSource.HUGGING_FACE) persistCustomModel(spec)
+    }
 
-        llmSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            ModelRegistry.ALL_LLM_OPTIONS.map { it.name },
-        )
-        llmSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedLlm = ModelRegistry.ALL_LLM_OPTIONS[position]
-                onModelSelectionChanged()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+    private fun customModelPrefs() = getSharedPreferences("hf_custom_models", MODE_PRIVATE)
+
+    private fun persistCustomModel(spec: ModelSpec) {
+        customModelPrefs().edit().putString(spec.category, spec.toJson().toString()).apply()
+    }
+
+    private fun loadPersistedCustomModel(category: String): ModelSpec? {
+        val json = customModelPrefs().getString(category, null) ?: return null
+        return try {
+            ModelSpec.fromJson(org.json.JSONObject(json))
+        } catch (ex: Exception) {
+            Log.e("MainActivity", "Failed to restore persisted $category model", ex)
+            null
         }
+    }
+
+    /** Re-applies whatever custom model was picked last session, per category. Must
+     * run after setupSpinners() — addAndSelect needs the listener already bound so
+     * selecting the restored entry actually updates selectedXxx. */
+    private fun restorePersistedCustomModels() {
+        loadPersistedCustomModel("VAD")?.let { addAndSelect(vadSpinner, vadOptions, it) }
+        loadPersistedCustomModel("STT")?.let { addAndSelect(sttSpinner, sttOptions, it) }
+        loadPersistedCustomModel("TTS")?.let { addAndSelect(ttsSpinner, ttsOptions, it) }
+        loadPersistedCustomModel("LLM")?.let { addAndSelect(llmSpinner, llmOptions, it) }
     }
 
     private fun onModelSelectionChanged() {
@@ -336,6 +375,109 @@ class MainActivity : Activity() {
             return
         }
         downloads.start(stack)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_HF_BROWSE || resultCode != RESULT_OK || data == null) return
+
+        val category = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_CATEGORY) ?: "LLM"
+        val multiFiles = data.getBundleExtra(HuggingFaceBrowserActivity.EXTRA_MULTI_FILES)
+        if (multiFiles != null) {
+            val repo = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_REPO) ?: return
+            val targetDirName = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_TARGET_DIR_NAME) ?: return
+            val backend = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_BACKEND)
+            val displayName = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_DISPLAY_NAME) ?: repo
+            val approxBytes = data.getLongExtra(HuggingFaceBrowserActivity.EXTRA_APPROX_BYTES, 0L)
+            val files = multiFiles.keySet().associateWith { multiFiles.getString(it)!! }
+            selectMultiFileHuggingFaceModel(repo, targetDirName, files, approxBytes, backend, displayName, category)
+            return
+        }
+
+        val repo = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_REPO) ?: return
+        val filename = data.getStringExtra(HuggingFaceBrowserActivity.EXTRA_FILENAME) ?: return
+        resolveHuggingFaceSelection(repo, filename, category)
+    }
+
+    private fun selectMultiFileHuggingFaceModel(
+        repo: String,
+        targetDirName: String,
+        files: Map<String, String>,
+        approxBytes: Long,
+        backend: String?,
+        displayName: String,
+        category: String,
+    ) {
+        val spec = HuggingFaceDownloader.createMultiFileModelSpec(
+            id = "hf_multi_${targetDirName.hashCode()}",
+            name = displayName,
+            category = category,
+            repo = repo,
+            targetDirName = targetDirName,
+            files = files,
+            approxBytes = approxBytes,
+            backend = backend,
+        )
+        when (category) {
+            "VAD" -> addAndSelect(vadSpinner, vadOptions, spec)
+            "STT" -> addAndSelect(sttSpinner, sttOptions, spec)
+            "TTS" -> addAndSelect(ttsSpinner, ttsOptions, spec)
+            else -> addAndSelect(llmSpinner, llmOptions, spec)
+        }
+        status.text = "Selected $category: ${spec.name} (${files.size} files, no sha256 — byte-count check only)"
+    }
+
+    /**
+     * Resolves a repo+filename picked in [HuggingFaceBrowserActivity] into a
+     * [ModelSpec] and selects it for the matching stage. Pulls the file's size and
+     * (when the file is an LFS object) sha256 from the repo listing so the resulting
+     * spec gets the same hard-fail integrity check as a curated registry entry.
+     */
+    private fun resolveHuggingFaceSelection(repo: String, filename: String, category: String) {
+        hfBrowseButtons.forEach { it.isEnabled = false }
+        status.text = "Resolving $filename from $repo…"
+        scope.launch {
+            val spec = try {
+                val files = HuggingFaceDownloader.fetchRepositoryFiles(repo)
+                val match = files.firstOrNull { it.path == filename }
+                if (match != null) {
+                    HuggingFaceDownloader.createModelSpec(
+                        id = "hf_custom_${filename.hashCode()}",
+                        name = "$repo / $filename",
+                        category = category,
+                        repo = repo,
+                        file = match,
+                    )
+                } else {
+                    HuggingFaceDownloader.createModelSpec(
+                        id = "hf_custom_${filename.hashCode()}",
+                        name = "$repo / $filename",
+                        category = category,
+                        repo = repo,
+                        filename = filename,
+                        approxBytes = 0L,
+                    )
+                }
+            } catch (ex: Throwable) {
+                Log.e("MainActivity", "Failed to resolve Hugging Face model", ex)
+                null
+            }
+
+            hfBrowseButtons.forEach { it.isEnabled = true }
+            if (spec == null) {
+                status.text = "Failed to resolve $filename from $repo (check logcat)."
+                return@launch
+            }
+
+            when (category) {
+                "VAD" -> addAndSelect(vadSpinner, vadOptions, spec)
+                "STT" -> addAndSelect(sttSpinner, sttOptions, spec)
+                "TTS" -> addAndSelect(ttsSpinner, ttsOptions, spec)
+                else -> addAndSelect(llmSpinner, llmOptions, spec)
+            }
+            val integrityNote = if (spec.sha256 != null) "sha256 verified" else "no sha256 — Content-Length only"
+            status.text = "Selected $category: ${spec.name} ($integrityNote)"
+        }
     }
 
     private fun onClearModels() {
@@ -494,5 +636,6 @@ class MainActivity : Activity() {
 
     private companion object {
         const val REQ_PERMS = 1
+        const val REQ_HF_BROWSE = 2
     }
 }

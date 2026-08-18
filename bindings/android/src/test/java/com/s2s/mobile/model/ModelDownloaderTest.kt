@@ -36,6 +36,20 @@ class ModelDownloaderTest {
     }
 
     @Test
+    fun testAllRegistrySpecsHaveSha256() {
+        // Curated registry entries are all LOCAL and must carry a verified checksum —
+        // this is the guarantee issue #21 exists to protect. Dynamically-resolved
+        // HUGGING_FACE specs are allowed to lack one (see HuggingFaceDownloaderTest);
+        // that relaxation must never leak into the curated registry.
+        val models = ModelRegistry.ALL_MODELS
+        assertTrue(models.isNotEmpty())
+        for (spec in models) {
+            assertEquals("Model ${spec.id} should be sourced LOCAL", ModelSource.LOCAL, spec.source)
+            assertTrue("Model ${spec.id} missing sha256 checksum", !spec.sha256.isNullOrBlank())
+        }
+    }
+
+    @Test
     fun testPresentValidationForMissingFile() {
         val dir = tempFolder.newFolder("models")
         val downloader = ModelDownloader(dir)
@@ -68,6 +82,31 @@ class ModelDownloaderTest {
 
         assertTrue(downloader.present(spec))
         assertTrue(downloader.missing(listOf(spec)).isEmpty())
+    }
+
+    @Test
+    fun testHuggingFaceSpecAllowsNullSha256() {
+        // Dynamic HF specs may lack a checksum (not every file is an LFS object) —
+        // present() must not require one; ModelDownloader.downloadSpec falls back to
+        // Content-Length verification only for these, never a silent downgrade of a
+        // checksum that WAS known (that guarantee is testAllRegistrySpecsHaveSha256).
+        val dir = tempFolder.newFolder("models")
+        val file = File(dir, "custom.gguf")
+        file.writeBytes(ByteArray(1000))
+
+        val spec = HuggingFaceDownloader.createModelSpec(
+            id = "custom_llm",
+            name = "Custom LLM",
+            category = "LLM",
+            repo = "someorg/some-repo",
+            filename = "custom.gguf",
+            approxBytes = 1000L,
+        )
+        assertEquals(ModelSource.HUGGING_FACE, spec.source)
+        assertEquals(null, spec.sha256)
+
+        val downloader = ModelDownloader(dir)
+        assertTrue(downloader.present(spec))
     }
 
     @Test

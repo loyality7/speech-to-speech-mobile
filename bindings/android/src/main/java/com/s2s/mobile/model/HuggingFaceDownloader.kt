@@ -79,8 +79,13 @@ object HuggingFaceDownloader {
                 val obj = array.getJSONObject(i)
                 val type = obj.optString("type", "file")
                 val path = obj.getString("path")
-                val size = obj.optLong("size", 0L)
-                val lfsOid = obj.optJSONObject("lfs")?.optString("oid")
+                val lfs = obj.optJSONObject("lfs")
+                // For an LFS-tracked file (every GGUF/large ONNX bundle), the top-level
+                // "size" is the tiny pointer file's size, not the real content — the
+                // real byte count lives in lfs.size. Non-LFS files have no "lfs" object
+                // and their top-level "size" is already correct.
+                val size = lfs?.optLong("size", 0L)?.takeIf { it > 0L } ?: obj.optLong("size", 0L)
+                val lfsOid = lfs?.optString("oid")
                 files.add(HuggingFaceFile(path = path, sizeBytes = size, type = type, lfsOid = lfsOid))
             }
             files
@@ -148,14 +153,18 @@ object HuggingFaceDownloader {
     )
 
     /**
-     * Searches Hugging Face model hub for public model repositories matching a query string.
+     * Searches Hugging Face model hub for public model repositories matching a query
+     * string, sorted by download count (most-used first) so a search screen shows
+     * trustworthy results before obscure ones.
      */
     suspend fun searchRepositories(
         query: String,
-        limit: Int = 10,
+        limit: Int = 20,
+        libraryFilter: String? = null,
     ): List<HuggingFaceRepoInfo> = withContext(Dispatchers.IO) {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val apiUrl = "https://huggingface.co/api/models?search=$encodedQuery&limit=$limit"
+        val filterParam = if (libraryFilter != null) "&filter=$libraryFilter" else ""
+        val apiUrl = "$HF_API_BASE?search=$encodedQuery&sort=downloads&direction=-1&limit=$limit$filterParam"
         val connection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
@@ -163,20 +172,26 @@ object HuggingFaceDownloader {
         }
 
         try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return@withContext emptyList()
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.e(TAG, "Failed to search Hugging Face for '$query': HTTP ${connection.responseCode}")
+                return@withContext emptyList()
+            }
             val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
             val array = JSONArray(jsonText)
             val repos = mutableListOf<HuggingFaceRepoInfo>()
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val id = obj.getString("id")
-                val downloads = obj.optInt("downloads", 0)
-                val likes = obj.optInt("likes", 0)
-                repos.add(HuggingFaceRepoInfo(id = id, downloads = downloads, likes = likes))
+                repos.add(
+                    HuggingFaceRepoInfo(
+                        id = obj.getString("id"),
+                        downloads = obj.optInt("downloads", 0),
+                        likes = obj.optInt("likes", 0),
+                    ),
+                )
             }
             repos
         } catch (e: Exception) {
-            Log.e(TAG, "Error searching HF repositories for $query", e)
+            Log.e(TAG, "Error searching Hugging Face repositories for '$query'", e)
             emptyList()
         } finally {
             connection.disconnect()
@@ -184,7 +199,47 @@ object HuggingFaceDownloader {
     }
 
     /**
+     * Extracts a hex SHA256 digest from a Hugging Face LFS object id, if present.
+     * Git LFS oids are formatted "sha256:<64 hex chars>"; anything else (or a
+     * missing oid, which is normal for small non-LFS files) yields null.
+     */
+    fun HuggingFaceFile.sha256OrNull(): String? =
+        lfsOid?.removePrefix("sha256:")?.takeIf { it.length == 64 }
+
+    /**
+     * Constructs a dynamic [ModelSpec] straight from a resolved [HuggingFaceFile] —
+     * e.g. the result of [selectOptimalGguf]. Pulls the checksum from the file's LFS
+     * oid automatically when available; see [createModelSpec] for what happens when
+     * it is not.
+     */
+    fun createModelSpec(
+        id: String,
+        name: String,
+        category: String,
+        repo: String,
+        file: HuggingFaceFile,
+        revision: String = "main",
+        backend: String? = null,
+    ): ModelSpec = createModelSpec(
+        id = id,
+        name = name,
+        category = category,
+        repo = repo,
+        filename = file.path,
+        approxBytes = file.sizeBytes,
+        revision = revision,
+        backend = backend,
+        sha256 = file.sha256OrNull(),
+    )
+
+    /**
      * Constructs a dynamic [ModelSpec] from a Hugging Face model repository and filename.
+     *
+     * [sha256] should come from the matching [HuggingFaceFile.sha256OrNull] when the
+     * repo lists the file via LFS — that gives the same hard-fail integrity guarantee
+     * as a curated registry entry. When unavailable, leave it null: [ModelDownloader]
+     * still enforces the downloaded byte count against the server's Content-Length,
+     * it just cannot cryptographically verify the content.
      */
     fun createModelSpec(
         id: String,
@@ -195,6 +250,7 @@ object HuggingFaceDownloader {
         approxBytes: Long,
         revision: String = "main",
         backend: String? = null,
+        sha256: String? = null,
     ): ModelSpec {
         val url = buildUrl(repo, filename, revision)
         val targetPath = File(filename).name
@@ -203,11 +259,46 @@ object HuggingFaceDownloader {
             category = category,
             name = name,
             url = url,
+            source = ModelSource.HUGGING_FACE,
             targetPath = targetPath,
             archive = false,
             approxBytes = approxBytes,
+            sha256 = sha256,
             version = revision,
             backend = backend,
         )
     }
+
+    /**
+     * Constructs a dynamic [ModelSpec] from several individually-fetched files in one
+     * Hugging Face repo — e.g. a VITS voice's .onnx plus its tokens.txt, which
+     * sherpa-onnx requires together in one directory (see ModelDownloader). [files]
+     * maps the plain filename to write (e.g. "tokens.txt") to its Hugging Face
+     * download URL. No sha256 is attached — see ModelDownloader.downloadMultiFileSpec
+     * for what integrity check applies instead.
+     */
+    fun createMultiFileModelSpec(
+        id: String,
+        name: String,
+        category: String,
+        repo: String,
+        targetDirName: String,
+        files: Map<String, String>,
+        approxBytes: Long,
+        revision: String = "main",
+        backend: String? = null,
+    ): ModelSpec = ModelSpec(
+        id = id,
+        category = category,
+        name = name,
+        url = files.values.firstOrNull() ?: "",
+        source = ModelSource.HUGGING_FACE,
+        targetPath = targetDirName,
+        archive = true,
+        multiFileUrls = files,
+        approxBytes = approxBytes,
+        sha256 = null,
+        version = revision,
+        backend = backend,
+    )
 }

@@ -81,38 +81,24 @@ class ModelDownloader(private val modelsDir: File) {
         specs.filterNot { present(it) }
 
     /**
-     * Cheap structural check — stats files and validates ONNX magic headers.
+     * Cheap structural check — stats files, never reads them.
      *
-     * Deliberately does NOT calculate expensive SHA256 hashes on UI thread.
-     * Integrates ONNX Protobuf magic byte checking (0x08 0x00) to ensure files aren't corrupt.
+     * Deliberately does NOT verify the checksum: this is called from UI callbacks on
+     * every status refresh, and hashing a 491 MB GGUF there is an ANR. Integrity is
+     * checked once, in downloadSpec, before the file is ever moved into place.
      */
     fun present(spec: ModelSpec): Boolean {
         val target = File(modelsDir, spec.targetPath)
-        return if (spec.archive) {
+        return if (spec.multiFileUrls.isNotEmpty()) {
+            spec.multiFileUrls.keys.all { File(target, it).isFile }
+        } else if (spec.archive) {
             val files = target.takeIf { it.isDirectory }?.listFiles() ?: return false
-            val hasTokens = files.any { it.isFile && it.name == "tokens.txt" }
-            val hasOnnx = files.any { it.isFile && isValidModelFile(it) }
-            hasTokens && hasOnnx
-        } else {
-            target.isFile && target.length() >= (spec.approxBytes * 8 / 10) && isValidModelFile(target)
-        }
-    }
-
-    private fun isValidModelFile(file: File): Boolean {
-        if (!file.isFile || file.length() == 0L) return false
-        if (file.name.endsWith(".onnx")) {
-            try {
-                file.inputStream().use { stream ->
-                    val header = ByteArray(2)
-                    if (stream.read(header) != 2) return false
-                    // ONNX Protobuf root field 1 (ir_version): tag 0x08, wire type 0
-                    if (header[0] != 0x08.toByte()) return false
-                }
-            } catch (_: Exception) {
-                return false
+            files.any {
+                it.isFile && (it.name.endsWith(".onnx") || it.name == "tokens.txt" || it.name.endsWith(".bin"))
             }
+        } else {
+            target.isFile && target.length() >= (spec.approxBytes * 9 / 10)
         }
-        return true
     }
 
     @Volatile
@@ -148,8 +134,103 @@ class ModelDownloader(private val modelsDir: File) {
                 break
             }
             onProgress(ModelProgress(spec.name, 0, 0L, spec.approxBytes, ModelProgress.Status.PRECHECK))
-            downloadSpec(spec, onProgress)
+            if (spec.multiFileUrls.isNotEmpty()) {
+                downloadMultiFileSpec(spec, onProgress)
+            } else {
+                downloadSpec(spec, onProgress)
+            }
         }
+    }
+
+    /**
+     * Downloads several individually-fetched files (e.g. a Hugging Face TTS voice's
+     * .onnx plus its tokens.txt) straight into [ModelSpec.targetPath] as a directory.
+     * No resume support and no per-file sha256 — these are dynamic HUGGING_FACE specs
+     * (see ModelSource), so the only integrity guarantee available is each file's own
+     * Content-Length, same floor as any other unverified dynamic download.
+     */
+    private fun downloadMultiFileSpec(spec: ModelSpec, onProgress: (ModelProgress) -> Unit) {
+        val targetDir = File(modelsDir, spec.targetPath)
+        val tmpDir = File(modelsDir, "${spec.targetPath}_tmp")
+        tmpDir.deleteRecursively()
+        tmpDir.mkdirs()
+
+        try {
+            val files = spec.multiFileUrls.entries.toList()
+            var doneBytes = 0L
+            val totalBytes = spec.approxBytes.coerceAtLeast(1L)
+            // Reporting progress on every 64KB chunk means ~1600 calls for a 100MB
+            // file, and each one round-trips through ModelDownloadService into a
+            // NotificationManager.notify() IPC to system_server — that IPC storm, not
+            // the network, is what makes a "100MB" download visibly crawl. Only
+            // report when the whole-percent value actually changes, same throttle
+            // the single-file path already uses.
+            var lastPercent = -1
+
+            for ((index, entry) in files.withIndex()) {
+                if (isCancelled) {
+                    Log.i(TAG, "Download cancelled before ${entry.key} for ${spec.name}")
+                    return
+                }
+                val (filename, url) = entry
+                val connection = openConnectionWithRedirects(url, 0L, null)
+                try {
+                    if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                        throw IllegalStateException(
+                            "${spec.name}: failed to fetch $filename — HTTP ${connection.responseCode}",
+                        )
+                    }
+                    val expectedLength = connection.contentLengthLong
+                    val outFile = File(tmpDir, filename)
+                    outFile.parentFile?.mkdirs()
+                    var fileBytes = 0L
+                    connection.inputStream.use { input ->
+                        FileOutputStream(outFile).use { output ->
+                            val buffer = ByteArray(1 shl 16)
+                            while (!isCancelled) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                output.write(buffer, 0, n)
+                                fileBytes += n
+                                val percent = (((doneBytes + fileBytes) * 100) / totalBytes).toInt().coerceIn(0, 99)
+                                if (percent != lastPercent) {
+                                    lastPercent = percent
+                                    onProgress(
+                                        ModelProgress(
+                                            spec.name, percent, doneBytes + fileBytes, totalBytes,
+                                            ModelProgress.Status.DOWNLOADING,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (isCancelled) return
+                    if (expectedLength > 0 && fileBytes != expectedLength) {
+                        throw IllegalStateException(
+                            "${spec.name}: truncated $filename — got $fileBytes bytes, expected $expectedLength",
+                        )
+                    }
+                    doneBytes += fileBytes
+                    Log.i(TAG, "${spec.name}: fetched $filename (${index + 1}/${files.size})")
+                } finally {
+                    connection.disconnect()
+                }
+            }
+
+            targetDir.deleteRecursively()
+            check(tmpDir.renameTo(targetDir)) { "${spec.name}: failed to move assembled files into target location" }
+            Log.w(
+                TAG,
+                "${spec.name}: no sha256 available for Hugging Face multi-file model — " +
+                    "verified by byte count only, not cryptographically",
+            )
+        } catch (e: Exception) {
+            tmpDir.deleteRecursively()
+            throw e
+        }
+
+        onProgress(ModelProgress(spec.name, 100, spec.approxBytes, spec.approxBytes, ModelProgress.Status.COMPLETED))
     }
 
     private fun downloadSpec(spec: ModelSpec, onProgress: (ModelProgress) -> Unit) {
@@ -170,7 +251,6 @@ class ModelDownloader(private val modelsDir: File) {
         val responseCode = connection.responseCode
 
         var resuming = false
-        var alreadyDownloaded = false
         if (existingBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
             resuming = true
             Log.i(TAG, "Resuming download for ${spec.name} from offset $existingBytes bytes")
@@ -181,25 +261,12 @@ class ModelDownloader(private val modelsDir: File) {
             tempFile.delete()
             val etag = connection.getHeaderField("ETag")
             if (etag.isNullOrBlank()) etagFile.delete() else etagFile.writeText(etag)
-        } else if (responseCode == 416) {
-            // HTTP 416 Range Not Satisfiable — offset is at/past EOF or invalid
-            connection.disconnect()
-            if (tempFile.isFile && tempFile.length() > 0) {
-                Log.i(TAG, "HTTP 416 received for ${spec.name}: temp file already downloaded (${tempFile.length()} bytes)")
-                alreadyDownloaded = true
-            } else {
-                Log.w(TAG, "HTTP 416 received for ${spec.name}: resetting temp file and retrying from offset 0")
-                tempFile.delete()
-                etagFile.delete()
-                connection = openConnectionWithRedirects(spec.url, 0L, null)
-                existingBytes = 0L
-            }
         } else {
             connection.disconnect()
             throw IllegalStateException("${spec.name}: Server returned HTTP $responseCode")
         }
 
-        val totalContentLength = if (alreadyDownloaded) tempFile.length() else connection.contentLengthLong
+        val totalContentLength = connection.contentLengthLong
         val totalBytes = if (resuming && totalContentLength > 0) {
             existingBytes + totalContentLength
         } else if (totalContentLength > 0) {
@@ -208,45 +275,43 @@ class ModelDownloader(private val modelsDir: File) {
             spec.approxBytes
         }
 
-        var downloadedBytes = if (alreadyDownloaded) tempFile.length() else existingBytes
+        var downloadedBytes = existingBytes
         var lastPercent = -1
 
-        if (!alreadyDownloaded) {
-            try {
-                connection.inputStream.use { input ->
-                    RandomAccessFile(tempFile, "rw").use { raf ->
-                        if (resuming) {
-                            raf.seek(existingBytes)
-                        } else {
-                            raf.setLength(0)
-                        }
+        try {
+            connection.inputStream.use { input ->
+                RandomAccessFile(tempFile, "rw").use { raf ->
+                    if (resuming) {
+                        raf.seek(existingBytes)
+                    } else {
+                        raf.setLength(0)
+                    }
 
-                        val buffer = ByteArray(1 shl 16)
-                        while (!isCancelled) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            raf.write(buffer, 0, n)
-                            downloadedBytes += n
+                    val buffer = ByteArray(1 shl 16)
+                    while (!isCancelled) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        raf.write(buffer, 0, n)
+                        downloadedBytes += n
 
-                            val percent = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
-                            if (percent != lastPercent) {
-                                lastPercent = percent
-                                onProgress(
-                                    ModelProgress(
-                                        spec.name,
-                                        percent,
-                                        downloadedBytes,
-                                        totalBytes,
-                                        ModelProgress.Status.DOWNLOADING,
-                                    ),
-                                )
-                            }
+                        val percent = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            onProgress(
+                                ModelProgress(
+                                    spec.name,
+                                    percent,
+                                    downloadedBytes,
+                                    totalBytes,
+                                    ModelProgress.Status.DOWNLOADING,
+                                ),
+                            )
                         }
                     }
                 }
-            } finally {
-                connection.disconnect()
             }
+        } finally {
+            connection.disconnect()
         }
 
         if (isCancelled) {
@@ -280,11 +345,22 @@ class ModelDownloader(private val modelsDir: File) {
             )
             val hash = calculateSha256(tempFile)
             if (!hash.equals(spec.sha256, ignoreCase = true)) {
-                val warnMsg = "SHA256 checksum warning for ${spec.name}: expected ${spec.sha256}, got $hash. Download byte length matches expected ($downloadedBytes bytes)."
-                Log.w(TAG, warnMsg)
-            } else {
-                Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
+                tempFile.delete()
+                etagFile.delete()
+                val errorMsg = "SHA256 checksum failed for ${spec.name}: expected ${spec.sha256}, got $hash"
+                Log.e(TAG, errorMsg)
+                throw IllegalStateException(errorMsg)
             }
+            Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
+        } else if (spec.source == ModelSource.HUGGING_FACE) {
+            // No checksum available from the Hugging Face API for this file (not an
+            // LFS object). Content-Length was already enforced above — that is the
+            // only integrity guarantee we can give for this download.
+            Log.w(
+                TAG,
+                "${spec.name}: no sha256 available from Hugging Face — verified by " +
+                    "byte count only ($downloadedBytes bytes), not cryptographically",
+            )
         }
 
         val target = File(modelsDir, spec.targetPath)
