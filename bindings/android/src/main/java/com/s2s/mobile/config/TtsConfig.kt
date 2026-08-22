@@ -45,4 +45,10 @@ data class TtsConfig(
     val minChunkChars: Int = 10,
     /** ONNX Runtime execution provider. See [VadConfig.provider] for the tradeoff. */
     val provider: String = "cpu",
+    /**
+     * Run synthesized audio through a DPDFNet 48kHz speech-enhancement pass
+     * before playback. Opt-in: real CPU cost per chunk, and needs
+     * [ModelPaths.hdAudioRestorerModel] set to a real file or this is a no-op.
+     */
+    val enableHdAudioRestorer: Boolean = false,
 )

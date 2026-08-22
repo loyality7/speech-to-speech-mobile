@@ -14,6 +14,17 @@
       "backend": "SILERO"
     },
     {
+      "id": "dsp_dpdfnet_48khz_restorer",
+      "category": "DSP",
+      "name": "DPDFNet 48kHz HD Audio Restorer (10 MB) [Optional, Opt-in]",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/dpdfnet2_48khz_hr.onnx",
+      "targetPath": "dpdfnet_48khz.onnx",
+      "archive": false,
+      "approxBytes": 10596848,
+      "sha256": "0b399f8a58dc4d70d8cd97541f5c39869406145193b957d00a03b66070944928",
+      "version": "dpdfnet2-48khz-hr"
+    },
+    {
       "id": "ten_vad",
       "category": "VAD",
       "name": "TEN VAD (~0.3 MB) [Lightweight]",
