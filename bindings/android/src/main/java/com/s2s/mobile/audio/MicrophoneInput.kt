@@ -33,6 +33,12 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
     @Volatile
     private var running = false
 
+    /** True once a real hardware AEC instance is active. Not requested/unavailable/failed all read false. */
+    val isHardwareAecActive: Boolean get() = aec?.enabled == true
+
+    /** True once a real hardware noise suppressor instance is active. */
+    val isHardwareNoiseSuppressionActive: Boolean get() = ns?.enabled == true
+
     override fun start(onFrame: (FloatArray) -> Unit): Boolean {
         if (running) return true
 
@@ -68,10 +74,14 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
         }
 
         if (config.echoCancellation && AcousticEchoCanceler.isAvailable()) {
-            aec = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
+            aec = runCatching { AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true } }
+                .onFailure { Log.w(TAG, "AcousticEchoCanceler.create failed, continuing without it", it) }
+                .getOrNull()
         }
         if (config.noiseSuppression && NoiseSuppressor.isAvailable()) {
-            ns = NoiseSuppressor.create(rec.audioSessionId)?.apply { enabled = true }
+            ns = runCatching { NoiseSuppressor.create(rec.audioSessionId)?.apply { enabled = true } }
+                .onFailure { Log.w(TAG, "NoiseSuppressor.create failed, continuing without it", it) }
+                .getOrNull()
         }
 
         record = rec
