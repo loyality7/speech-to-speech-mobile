@@ -10,11 +10,13 @@ import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.internal.BargeInGate
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.llm.ChatHistory
-import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.llm.LiteRtLanguageModel
 import com.s2s.mobile.llm.LlamaLanguageModel
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
+import com.s2s.mobile.pipeline.ChatMessage
 import com.s2s.mobile.pipeline.LanguageModel
+import com.s2s.mobile.pipeline.LlmBackend
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
 import com.s2s.mobile.pipeline.TextChunker
@@ -39,6 +41,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
+
+/** Picks the [LanguageModel] implementation [LlmConfig.backend] requires. */
+private fun defaultLanguageModel(config: S2SConfig): LanguageModel =
+    when (config.llm.backend) {
+        LlmBackend.LLAMA_CPP -> LlamaLanguageModel(config.llm, config.models.llmModel)
+        LlmBackend.LITERT -> LiteRtLanguageModel(config.llm, config.models.llmModel)
+    }
 
 /**
  * Picks the recogniser implementation the configured backend requires.
@@ -85,7 +94,7 @@ class S2SEngine @JvmOverloads constructor(
     private val config: S2SConfig,
     private val vad: VoiceActivityDetector = defaultVad(config),
     private val recognizer: SpeechRecognizer = defaultRecognizer(config),
-    private val languageModel: LanguageModel = LlamaLanguageModel(config.llm, config.models.llmModel),
+    private val languageModel: LanguageModel = defaultLanguageModel(config),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
     private val microphone: AudioInput = MicrophoneInput(config.audio),
     private val chunker: TextChunker =

@@ -3,6 +3,19 @@ package com.s2s.mobile.pipeline
 /** One turn of the conversation. [role] is `system`, `user` or `assistant`. */
 data class ChatMessage(val role: String, val content: String)
 
+/**
+ * On-device text generation runtimes the bundled [LanguageModel] implementations
+ * support. Each expects a different model file format, so switching backend
+ * means switching model file, not just a flag.
+ */
+enum class LlmBackend {
+    /** llama.cpp via Llamatik. GGUF Q4/Q5/Q8 checkpoints. */
+    LLAMA_CPP,
+
+    /** Google's LiteRT-LM. Single `.litertlm` checkpoints. */
+    LITERT,
+}
+
 /** Callbacks for a streaming generation. Invoked on the caller's thread. */
 interface TokenSink {
     fun onToken(text: String)

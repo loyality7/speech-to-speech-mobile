@@ -1,5 +1,7 @@
 package com.s2s.mobile.config
 
+import com.s2s.mobile.pipeline.LlmBackend
+
 /**
  * Text generation, plus the rolling-memory policy that keeps a long
  * conversation from growing the KV cache without bound.
@@ -51,4 +53,6 @@ data class LlmConfig(
     val reuseKvCache: Boolean = true,
     /** Enable tool calling. Adds a tool description block to the system prompt. */
     val toolsEnabled: Boolean = false,
+    /** Which on-device runtime [modelPath] targets. Must match the model file format. */
+    val backend: LlmBackend = LlmBackend.LLAMA_CPP,
 )
