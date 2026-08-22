@@ -451,16 +451,8 @@ class S2SEngine @JvmOverloads constructor(
         // Record what was actually said before the cut. The user heard it, so the
         // model should know it said it — and it keeps any KV cache consistent with
         // the prompt, which is what lets the next turn reuse the cache instead of
-        // rebuilding the whole conversation. If interrupted before any tokens were
-        // generated, drop the unanswered user turn so history does not contain
-        // consecutive user turns.
-        val replyText = partialReply.trim()
-        if (replyText.isNotEmpty()) {
-            history.addAssistant(replyText)
-            partialReply = ""
-        } else {
-            history.dropLastUserIfUnanswered()
-        }
+        // rebuilding the whole conversation.
+        commitOrDropPendingTurn()
         speaker?.flush()
         chunker.reset()
         synthesisDone = true
@@ -664,6 +656,12 @@ class S2SEngine @JvmOverloads constructor(
                             history.addAssistant(full)
                             emit(S2SEvent.AssistantDone(full))
                         }
+                        // Committed above (or was blank and never will be): clear
+                        // it so a barge-in that lands later, while this turn's
+                        // audio is still finishing playback, does not read this
+                        // stale value and commit the same reply to history a
+                        // second time via commitOrDropPendingTurn().
+                        partialReply = ""
                         markSynthesisDone(turn)
                         if (full.isBlank() && running && _state.value == S2SState.THINKING) {
                             setState(S2SState.LISTENING)
@@ -673,6 +671,7 @@ class S2SEngine @JvmOverloads constructor(
                     override fun onError(message: String, cause: Throwable?) {
                         if (turns.isStale(turn)) return
                         synthesisDone = true
+                        commitOrDropPendingTurn()
                         emit(S2SEvent.Error("LLM error: $message", cause))
                         if (running) setState(S2SState.LISTENING)
                     }
@@ -682,10 +681,32 @@ class S2SEngine @JvmOverloads constructor(
             if (!turns.isStale(turn)) {
                 Log.e(TAG, "Turn $turn generation failed with exception", e)
                 synthesisDone = true
+                commitOrDropPendingTurn()
                 emit(S2SEvent.Error("LLM error: ${e.message}", e))
                 if (running) setState(S2SState.LISTENING)
             }
         }
+    }
+
+    /**
+     * Leaves history consistent after a generation that did not complete
+     * normally (an LLM error here; a barge-in via [interrupt]).
+     *
+     * Without this, the user turn that triggered the failed generation sits in
+     * history with no reply and never gets one — the next turn then adds a
+     * second consecutive user message on top of it. LlamaLanguageModel
+     * tolerates that silently (a slightly malformed prompt, just slower);
+     * LiteRT-LM's chat template hard-rejects consecutive same-role messages, so
+     * every turn after the first failure fails the same way once this happens.
+     */
+    private fun commitOrDropPendingTurn() {
+        val replyText = partialReply.trim()
+        if (replyText.isNotEmpty()) {
+            history.addAssistant(replyText)
+        } else {
+            history.dropLastUserIfUnanswered()
+        }
+        partialReply = ""
     }
 
     private fun runTool(turn: Int, name: String, raw: String, depth: Int = 0) {
@@ -707,6 +728,9 @@ class S2SEngine @JvmOverloads constructor(
         // nowhere in the prompt, and every turn after a tool call pays a full
         // prefill.
         history.addAssistant(raw)
+        // Committed above; see the same reasoning where the normal reply path
+        // clears it, in generate()'s onComplete.
+        partialReply = ""
 
         // Feed the result back so the model can say what it did, rather than the
         // user hearing silence after a successful action.

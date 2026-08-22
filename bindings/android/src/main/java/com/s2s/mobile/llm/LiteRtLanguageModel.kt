@@ -21,12 +21,19 @@ import java.util.concurrent.CountDownLatch
 /**
  * Streaming generation on Google's LiteRT-LM, for `.litertlm` checkpoints.
  *
- * Unlike [LlamaLanguageModel], LiteRT-LM's [Conversation] keeps its own message
- * history natively rather than accepting the full prompt on every call — so
- * this reuses [CacheAnchor] the other way round: instead of finding where a KV
- * cache ends, it finds whether the current [Conversation] already holds every
- * message except the newest one, and only replays history when it does not
- * (a barge-in, a continued turn, or the very first call).
+ * A fresh [Conversation] is created for every [generate] call, seeded with the
+ * full history via [ConversationConfig.initialMessages] — matching the only
+ * verified-working pattern for this API in this workspace (the sibling
+ * `speech-android/control-demo` project's `LiteRtLmRuntime`). An earlier version
+ * of this class tried to keep one [Conversation] alive across turns and feed it
+ * only the newest message, on the theory that its native history tracks
+ * [S2SEngine]'s own; that broke on the second turn on a real device with
+ * "Conversation roles must alternate" even though the first turn's reply had
+ * already streamed to completion — so whatever the reply-commit timing on the
+ * native side actually is, it cannot be relied on here. This costs the KV/session
+ * reuse LlamaLanguageModel gets from keeping one session warm; it does not have
+ * a documented equivalent that survives close()/createConversation() in the
+ * Kotlin API.
  */
 class LiteRtLanguageModel(
     private val config: LlmConfig,
@@ -34,26 +41,11 @@ class LiteRtLanguageModel(
 ) : LanguageModel {
 
     private var engine: Engine? = null
-    private var conversation: Conversation? = null
+    private var activeConversation: Conversation? = null
 
     /** True once initialize() has loaded a model; generate() refuses to run without it. */
     @Volatile
     private var loaded = false
-
-    /**
-     * Set on [cancel] and [resetContext].
-     *
-     * LiteRT-LM documents the native session as unsafe to reuse after
-     * `cancelProcess()` — the conversation is considered poisoned — so this
-     * forces the next [generate] to close it and open a fresh one rather than
-     * trying to keep talking to a session that may no longer be consistent.
-     */
-    @Volatile
-    private var contextDirty = false
-
-    /** Content of the last message handed to the active [Conversation]. See [CacheAnchor]. */
-    @Volatile
-    private var cacheTail: String? = null
 
     @Volatile
     private var generating = false
@@ -92,39 +84,20 @@ class LiteRtLanguageModel(
         }
 
         try {
-            // Reusable only when the active conversation already holds every
-            // message up to but not including this one — anything else (a
-            // rewritten history, a dropped turn, a cancelled generation) means
-            // the native history and our list have diverged, so the whole
-            // conversation must be rebuilt rather than trusted.
-            val anchor = CacheAnchor.indexIn(messages, cacheTail)
-            val reusable = conversation != null && !contextDirty && anchor == messages.size - 2
-
-            val active = if (reusable) {
-                conversation!!
-            } else {
-                runCatching { conversation?.close() }
-                eng.createConversation(buildConfig(messages.dropLast(1))).also { conversation = it }
-            }
-            contextDirty = false
-            cacheTail = last.content.trim()
+            runCatching { activeConversation?.close() }
+            val active = eng.createConversation(buildConfig(messages.dropLast(1)))
+            activeConversation = active
 
             val latch = CountDownLatch(1)
-            val generated = StringBuilder()
             val callback = object : MessageCallback {
                 override fun onMessage(message: Message) {
                     // Each callback is a delta chunk, not the accumulated reply so far.
                     val text = message.contents.toString()
                     if (text.isEmpty()) return
-                    generated.append(text)
                     sink.onToken(text)
                 }
 
                 override fun onDone() {
-                    // The cache now ends at the assistant's reply, not the user
-                    // message that triggered it — same reasoning as CacheAnchor's
-                    // use in LlamaLanguageModel.
-                    generated.toString().trim().ifBlank { null }?.let { cacheTail = it }
                     sink.onComplete()
                     latch.countDown()
                 }
@@ -177,29 +150,26 @@ class LiteRtLanguageModel(
     }
 
     override fun cancel() {
-        // Documented as unsafe to keep talking to afterward — see contextDirty.
-        runCatching { conversation?.cancelProcess() }
-        contextDirty = true
+        // Each turn gets a fresh Conversation anyway (see class doc), so there
+        // is no session-poisoning concern here — just stop the current one.
+        runCatching { activeConversation?.cancelProcess() }
     }
 
-    override fun resetContext() {
-        contextDirty = true
-    }
+    /** No-op: every turn already rebuilds its Conversation from S2SEngine's own history. */
+    override fun resetContext() = Unit
 
     override fun trimMemory() {
         if (generating) return // matches LlamaLanguageModel: never touch state mid-stream
-        runCatching { conversation?.close() }
-        conversation = null
-        contextDirty = true
+        runCatching { activeConversation?.close() }
+        activeConversation = null
     }
 
     override fun release() {
         loaded = false
-        runCatching { conversation?.close() }
-        conversation = null
+        runCatching { activeConversation?.close() }
+        activeConversation = null
         runCatching { engine?.close() }
         engine = null
-        contextDirty = false
     }
 
     private companion object {

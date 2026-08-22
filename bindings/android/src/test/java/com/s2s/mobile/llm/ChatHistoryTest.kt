@@ -62,6 +62,26 @@ class ChatHistoryTest {
     }
 
     @Test
+    fun testCompactionNeverStrandsLeadingAssistant() {
+        // Real usage appends one message at a time (addUser, then later
+        // addAssistant), not in pairs — so overflow can be triggered mid-pair.
+        // Trimming an odd count off the front then stranded the matching
+        // assistant message as the new head. llama.cpp tolerates a
+        // system/assistant/user/... prompt silently; LiteRT-LM's chat template
+        // hard-rejects a conversation that doesn't start with user.
+        val history = ChatHistory("System prompt", keepTurns = 2, compact = true)
+        repeat(5) { i ->
+            history.addUser("User message $i")
+            history.messages().filterNot { it.role == "system" }
+                .firstOrNull()?.let { assertEquals("user", it.role) }
+
+            history.addAssistant("Assistant response $i")
+            history.messages().filterNot { it.role == "system" }
+                .firstOrNull()?.let { assertEquals("user", it.role) }
+        }
+    }
+
+    @Test
     fun testClear() {
         val history = ChatHistory("System prompt")
         history.addUser("Hello")
