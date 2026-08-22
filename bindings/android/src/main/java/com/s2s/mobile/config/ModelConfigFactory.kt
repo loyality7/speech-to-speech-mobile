@@ -30,6 +30,8 @@ object ModelConfigFactory {
         backend = when (spec.backend) {
             "ZIPFORMER_TRANSDUCER" -> SttBackend.ZIPFORMER_TRANSDUCER
             "WHISPER" -> SttBackend.WHISPER
+            "PARAKEET_TDT" -> SttBackend.PARAKEET_TDT
+            "CANARY" -> SttBackend.CANARY
             else -> SttBackend.MOONSHINE
         },
         numThreads = spec.numThreads ?: 2,

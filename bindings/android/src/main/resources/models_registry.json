@@ -52,6 +52,19 @@
       "numThreads": 2
     },
     {
+      "id": "stt_parakeet_tdt_v3",
+      "category": "STT",
+      "name": "Parakeet TDT 0.6B v3 int8 (487 MB) [High Accuracy]",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+      "targetPath": "stt_parakeet",
+      "archive": true,
+      "approxBytes": 487170055,
+      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+      "version": "parakeet-tdt-0.6b-v3-int8",
+      "backend": "PARAKEET_TDT",
+      "numThreads": 4
+    },
+    {
       "id": "stt_whisper_base",
       "category": "STT",
       "name": "Whisper Base en (208 MB) [Offline Reference]",
@@ -62,6 +75,19 @@
       "sha256": "34e2b040e9a5c4915d757947cbfa5dabe304a78fdcdde71caab27b02ee5d6f83",
       "version": "whisper-base",
       "backend": "WHISPER",
+      "numThreads": 2
+    },
+    {
+      "id": "stt_canary_180m",
+      "category": "STT",
+      "name": "Canary 180M Flash int8 (154 MB) [Multilingual EN/DE/ES/FR]",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8.tar.bz2",
+      "targetPath": "stt_canary",
+      "archive": true,
+      "approxBytes": 153692328,
+      "sha256": "7a38ed8b13f014ad632b09ff8d22e0c6f1359dd046af9235d281dfae841b9ab9",
+      "version": "canary-180m-flash-int8",
+      "backend": "CANARY",
       "numThreads": 2
     },
     {

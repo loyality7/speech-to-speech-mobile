@@ -35,6 +35,13 @@ enum class SttBackend(val streaming: Boolean) {
 
     /** Whisper. Widely understood baseline; slower than Moonshine at equal size. */
     WHISPER(streaming = false),
+
+    /**
+     * NeMo Canary 180M Flash. Multilingual (EN/DE/ES/FR) with punctuation
+     * restoration; ~154 MB. No translation support wired here — src/tgt are
+     * both pinned to the spoken language.
+     */
+    CANARY(streaming = false),
 }
 
 /**
