@@ -2,6 +2,7 @@ package com.s2s.mobile.stt
 
 import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineCanaryModelConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
@@ -128,6 +129,21 @@ class OfflineVadRecognizer(
                 whisper = OfflineWhisperModelConfig(
                     encoder = pick(dir, "encoder"),
                     decoder = pick(dir, "decoder"),
+                ),
+                tokens = tokens.absolutePath,
+                numThreads = sttConfig.numThreads,
+                provider = "cpu",
+            )
+
+            SttBackend.CANARY -> OfflineModelConfig(
+                canary = OfflineCanaryModelConfig(
+                    encoder = pick(dir, "encoder"),
+                    decoder = pick(dir, "decoder"),
+                    // Translation is not wired here; src/tgt pinned to the same
+                    // language keeps this a transcriber, not a translator.
+                    srcLang = "en",
+                    tgtLang = "en",
+                    usePnc = true,
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
