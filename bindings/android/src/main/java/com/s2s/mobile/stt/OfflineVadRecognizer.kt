@@ -155,7 +155,11 @@ class OfflineVadRecognizer(
             config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = audioConfig.sampleRate, featureDim = sttConfig.featureDim),
                 modelConfig = model,
-                decodingMethod = sttConfig.decodingMethod,
+                // Moonshine's native decoder hard-rejects anything but greedy_search
+                // (sherpa-onnx logs "Only greedy_search is supported... Given
+                // modified_beam_search" and the recognizer never becomes usable) —
+                // not a config choice, so it is never taken from sttConfig.
+                decodingMethod = if (sttConfig.backend == SttBackend.MOONSHINE) "greedy_search" else sttConfig.decodingMethod,
             ),
         )
         Unit
