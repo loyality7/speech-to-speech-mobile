@@ -83,6 +83,13 @@ dependencies {
     // llama.cpp runtime for on-device LLM generation.
     api("com.llamatik:library:1.7.0")
 
+    // Optional pluggable LLM backend: Google's LiteRT-LM, for .litertlm models.
+    // 0.16.0 pinned rather than latest.release: it is the version verified
+    // on-emulator in the sibling speech-android/control-demo project (a past
+    // release, 0.14.0, shipped an AAR built against a newer kotlinx-coroutines
+    // than its own POM declared).
+    api("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
+
     testImplementation("junit:junit:4.13.2")
 
     // Android ships org.json in the platform, but android.jar's copy is a stub that

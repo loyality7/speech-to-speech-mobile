@@ -1,6 +1,7 @@
 package com.s2s.mobile.config
 
 import com.s2s.mobile.model.ModelSpec
+import com.s2s.mobile.pipeline.LlmBackend
 import com.s2s.mobile.pipeline.TtsBackend
 import java.io.File
 
@@ -53,6 +54,10 @@ object ModelConfigFactory {
     )
 
     fun llm(spec: ModelSpec) = LlmConfig(
+        backend = when (spec.backend) {
+            "LITERT" -> LlmBackend.LITERT
+            else -> LlmBackend.LLAMA_CPP
+        },
         numThreads = spec.numThreads ?: 4,
         batchSize = spec.batchSize ?: 512,
         maxTokens = spec.maxTokens ?: 256,
