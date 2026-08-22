@@ -39,6 +39,12 @@
             android:exported="false"
             android:label="STT Model Tester"
             android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".HuggingFaceBrowserActivity"
+            android:exported="false"
+            android:label="Hugging Face Models"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>

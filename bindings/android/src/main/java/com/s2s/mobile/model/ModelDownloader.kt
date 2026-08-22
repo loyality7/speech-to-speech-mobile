@@ -22,7 +22,16 @@ import java.security.MessageDigest
  * - SHA256 integrity verification (prevents truncated GGUF native crashes)
  * - Safe archive extraction with path traversal guards
  */
-class ModelDownloader(private val modelsDir: File) {
+class ModelDownloader(
+    private val modelsDir: File,
+    /**
+     * Hugging Face access token, sent as `Authorization: Bearer` on requests to
+     * huggingface.co only — never to whatever host a redirect points at, license-
+     * gated repos (e.g. Gemma) return 401 to anonymous requests regardless of how
+     * the download itself is written.
+     */
+    private val huggingFaceToken: String? = null,
+) {
 
     /** Deletes every downloaded model — hundreds of MB, so never on the caller's thread. */
     suspend fun clearAll(): Boolean = withContext(Dispatchers.IO) {
@@ -89,7 +98,9 @@ class ModelDownloader(private val modelsDir: File) {
      */
     fun present(spec: ModelSpec): Boolean {
         val target = File(modelsDir, spec.targetPath)
-        return if (spec.archive) {
+        return if (spec.multiFileUrls.isNotEmpty()) {
+            spec.multiFileUrls.keys.all { File(target, it).isFile }
+        } else if (spec.archive) {
             val files = target.takeIf { it.isDirectory }?.listFiles() ?: return false
             files.any {
                 it.isFile && (it.name.endsWith(".onnx") || it.name == "tokens.txt" || it.name.endsWith(".bin"))
@@ -132,8 +143,103 @@ class ModelDownloader(private val modelsDir: File) {
                 break
             }
             onProgress(ModelProgress(spec.name, 0, 0L, spec.approxBytes, ModelProgress.Status.PRECHECK))
-            downloadSpec(spec, onProgress)
+            if (spec.multiFileUrls.isNotEmpty()) {
+                downloadMultiFileSpec(spec, onProgress)
+            } else {
+                downloadSpec(spec, onProgress)
+            }
         }
+    }
+
+    /**
+     * Downloads several individually-fetched files (e.g. a Hugging Face TTS voice's
+     * .onnx plus its tokens.txt) straight into [ModelSpec.targetPath] as a directory.
+     * No resume support and no per-file sha256 — these are dynamic HUGGING_FACE specs
+     * (see ModelSource), so the only integrity guarantee available is each file's own
+     * Content-Length, same floor as any other unverified dynamic download.
+     */
+    private fun downloadMultiFileSpec(spec: ModelSpec, onProgress: (ModelProgress) -> Unit) {
+        val targetDir = File(modelsDir, spec.targetPath)
+        val tmpDir = File(modelsDir, "${spec.targetPath}_tmp")
+        tmpDir.deleteRecursively()
+        tmpDir.mkdirs()
+
+        try {
+            val files = spec.multiFileUrls.entries.toList()
+            var doneBytes = 0L
+            val totalBytes = spec.approxBytes.coerceAtLeast(1L)
+            // Reporting progress on every 64KB chunk means ~1600 calls for a 100MB
+            // file, and each one round-trips through ModelDownloadService into a
+            // NotificationManager.notify() IPC to system_server — that IPC storm, not
+            // the network, is what makes a "100MB" download visibly crawl. Only
+            // report when the whole-percent value actually changes, same throttle
+            // the single-file path already uses.
+            var lastPercent = -1
+
+            for ((index, entry) in files.withIndex()) {
+                if (isCancelled) {
+                    Log.i(TAG, "Download cancelled before ${entry.key} for ${spec.name}")
+                    return
+                }
+                val (filename, url) = entry
+                val connection = openConnectionWithRedirects(url, 0L, null)
+                try {
+                    if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                        throw IllegalStateException(
+                            "${spec.name}: failed to fetch $filename — HTTP ${connection.responseCode}",
+                        )
+                    }
+                    val expectedLength = connection.contentLengthLong
+                    val outFile = File(tmpDir, filename)
+                    outFile.parentFile?.mkdirs()
+                    var fileBytes = 0L
+                    connection.inputStream.use { input ->
+                        FileOutputStream(outFile).use { output ->
+                            val buffer = ByteArray(1 shl 16)
+                            while (!isCancelled) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                output.write(buffer, 0, n)
+                                fileBytes += n
+                                val percent = (((doneBytes + fileBytes) * 100) / totalBytes).toInt().coerceIn(0, 99)
+                                if (percent != lastPercent) {
+                                    lastPercent = percent
+                                    onProgress(
+                                        ModelProgress(
+                                            spec.name, percent, doneBytes + fileBytes, totalBytes,
+                                            ModelProgress.Status.DOWNLOADING,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (isCancelled) return
+                    if (expectedLength > 0 && fileBytes != expectedLength) {
+                        throw IllegalStateException(
+                            "${spec.name}: truncated $filename — got $fileBytes bytes, expected $expectedLength",
+                        )
+                    }
+                    doneBytes += fileBytes
+                    Log.i(TAG, "${spec.name}: fetched $filename (${index + 1}/${files.size})")
+                } finally {
+                    connection.disconnect()
+                }
+            }
+
+            targetDir.deleteRecursively()
+            check(tmpDir.renameTo(targetDir)) { "${spec.name}: failed to move assembled files into target location" }
+            Log.w(
+                TAG,
+                "${spec.name}: no sha256 available for Hugging Face multi-file model — " +
+                    "verified by byte count only, not cryptographically",
+            )
+        } catch (e: Exception) {
+            tmpDir.deleteRecursively()
+            throw e
+        }
+
+        onProgress(ModelProgress(spec.name, 100, spec.approxBytes, spec.approxBytes, ModelProgress.Status.COMPLETED))
     }
 
     private fun downloadSpec(spec: ModelSpec, onProgress: (ModelProgress) -> Unit) {
@@ -249,14 +355,27 @@ class ModelDownloader(private val modelsDir: File) {
             val hash = calculateSha256(tempFile)
             if (!hash.equals(spec.sha256, ignoreCase = true)) {
                 tempFile.delete()
+                etagFile.delete()
                 val errorMsg = "SHA256 checksum failed for ${spec.name}: expected ${spec.sha256}, got $hash"
                 Log.e(TAG, errorMsg)
                 throw IllegalStateException(errorMsg)
             }
+            Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
+        } else if (spec.source == ModelSource.HUGGING_FACE) {
+            // No checksum available from the Hugging Face API for this file (not an
+            // LFS object). Content-Length was already enforced above — that is the
+            // only integrity guarantee we can give for this download.
+            Log.w(
+                TAG,
+                "${spec.name}: no sha256 available from Hugging Face — verified by " +
+                    "byte count only ($downloadedBytes bytes), not cryptographically",
+            )
         }
 
         val target = File(modelsDir, spec.targetPath)
         if (spec.archive) {
+            val tmpTarget = File(modelsDir, "${spec.targetPath}_tmp")
+            tmpTarget.deleteRecursively()
             onProgress(
                 ModelProgress(
                     spec.name,
@@ -266,21 +385,28 @@ class ModelDownloader(private val modelsDir: File) {
                     ModelProgress.Status.EXTRACTING,
                 ),
             )
-            target.deleteRecursively()
             val archiveSize = tempFile.length().coerceAtLeast(1L)
-            extractTarBz2(tempFile, target) { extractedBytes ->
-                val percent = ((extractedBytes * 100) / archiveSize).toInt().coerceIn(0, 99)
-                onProgress(
-                    ModelProgress(
-                        spec.name,
-                        percent,
-                        extractedBytes,
-                        archiveSize,
-                        ModelProgress.Status.EXTRACTING,
-                    ),
-                )
+            try {
+                extractTarBz2(tempFile, tmpTarget) { extractedBytes ->
+                    val percent = ((extractedBytes * 100) / archiveSize).toInt().coerceIn(0, 99)
+                    onProgress(
+                        ModelProgress(
+                            spec.name,
+                            percent,
+                            extractedBytes,
+                            archiveSize,
+                            ModelProgress.Status.EXTRACTING,
+                        ),
+                    )
+                }
+                target.deleteRecursively()
+                check(tmpTarget.renameTo(target)) { "${spec.name}: failed to move extracted archive into target location" }
+            } catch (e: Exception) {
+                tmpTarget.deleteRecursively()
+                throw e
+            } finally {
+                tempFile.delete()
             }
-            tempFile.delete()
         } else {
             target.delete()
             check(tempFile.renameTo(target)) { "${spec.name}: rename temp file to target failed" }
@@ -304,7 +430,7 @@ class ModelDownloader(private val modelsDir: File) {
         resumeBytes: Long,
         etag: String? = null,
     ): HttpURLConnection {
-        var currentUrl = urlStr
+        var currentUrl = HuggingFaceDownloader.resolveUrl(urlStr)
         var redirects = 0
         while (redirects < 5) {
             val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
@@ -317,6 +443,7 @@ class ModelDownloader(private val modelsDir: File) {
                     // ignores the range and sends 200 with the whole file.
                     if (etag != null) setRequestProperty("If-Range", etag)
                 }
+                applyHuggingFaceAuth(this, currentUrl)
             }
             conn.connect()
             val code = conn.responseCode
@@ -336,7 +463,21 @@ class ModelDownloader(private val modelsDir: File) {
                 setRequestProperty("Range", "bytes=$resumeBytes-")
                 if (etag != null) setRequestProperty("If-Range", etag)
             }
+            applyHuggingFaceAuth(this, currentUrl)
             connect()
+        }
+    }
+
+    /**
+     * Only huggingface.co gets the token — a redirect can land anywhere (a CDN,
+     * in practice), and a Hugging Face access token has no business leaving
+     * Hugging Face's own domain.
+     */
+    private fun applyHuggingFaceAuth(conn: HttpURLConnection, url: String) {
+        if (huggingFaceToken.isNullOrBlank()) return
+        val host = runCatching { URL(url).host }.getOrNull() ?: return
+        if (host == "huggingface.co" || host.endsWith(".huggingface.co")) {
+            conn.setRequestProperty("Authorization", "Bearer $huggingFaceToken")
         }
     }
 
