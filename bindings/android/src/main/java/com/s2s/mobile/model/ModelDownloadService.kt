@@ -58,7 +58,7 @@ class ModelDownloadService : Service() {
             return
         }
 
-        val downloader = ModelDownloader(modelsDir).also { this.downloader = it }
+        val downloader = ModelDownloader(modelsDir, S2SModels.huggingFaceToken(this)).also { this.downloader = it }
 
         val notification = buildNotification("Starting download...", 0)
         startForeground(NOTIFICATION_ID, notification)

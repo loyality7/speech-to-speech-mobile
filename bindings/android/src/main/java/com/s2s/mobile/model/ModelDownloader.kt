@@ -22,7 +22,16 @@ import java.security.MessageDigest
  * - SHA256 integrity verification (prevents truncated GGUF native crashes)
  * - Safe archive extraction with path traversal guards
  */
-class ModelDownloader(private val modelsDir: File) {
+class ModelDownloader(
+    private val modelsDir: File,
+    /**
+     * Hugging Face access token, sent as `Authorization: Bearer` on requests to
+     * huggingface.co only — never to whatever host a redirect points at, license-
+     * gated repos (e.g. Gemma) return 401 to anonymous requests regardless of how
+     * the download itself is written.
+     */
+    private val huggingFaceToken: String? = null,
+) {
 
     /** Deletes every downloaded model — hundreds of MB, so never on the caller's thread. */
     suspend fun clearAll(): Boolean = withContext(Dispatchers.IO) {
@@ -434,6 +443,7 @@ class ModelDownloader(private val modelsDir: File) {
                     // ignores the range and sends 200 with the whole file.
                     if (etag != null) setRequestProperty("If-Range", etag)
                 }
+                applyHuggingFaceAuth(this, currentUrl)
             }
             conn.connect()
             val code = conn.responseCode
@@ -453,7 +463,21 @@ class ModelDownloader(private val modelsDir: File) {
                 setRequestProperty("Range", "bytes=$resumeBytes-")
                 if (etag != null) setRequestProperty("If-Range", etag)
             }
+            applyHuggingFaceAuth(this, currentUrl)
             connect()
+        }
+    }
+
+    /**
+     * Only huggingface.co gets the token — a redirect can land anywhere (a CDN,
+     * in practice), and a Hugging Face access token has no business leaving
+     * Hugging Face's own domain.
+     */
+    private fun applyHuggingFaceAuth(conn: HttpURLConnection, url: String) {
+        if (huggingFaceToken.isNullOrBlank()) return
+        val host = runCatching { URL(url).host }.getOrNull() ?: return
+        if (host == "huggingface.co" || host.endsWith(".huggingface.co")) {
+            conn.setRequestProperty("Authorization", "Bearer $huggingFaceToken")
         }
     }
 

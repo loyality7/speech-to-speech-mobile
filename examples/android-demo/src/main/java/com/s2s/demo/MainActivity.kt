@@ -16,6 +16,7 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -25,7 +26,6 @@ import com.s2s.mobile.S2SEvent
 import com.s2s.mobile.config.ModelConfigFactory
 import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
-import com.s2s.mobile.model.ModelDownloader
 import com.s2s.mobile.model.HuggingFaceDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
@@ -76,7 +76,7 @@ class MainActivity : Activity() {
     private var engine: S2SEngine? = null
     private var running = false
     private var partialShown = false
-    private val downloader by lazy { ModelDownloader(modelsDir()) }
+    private val downloader by lazy { S2SModels.downloader(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -177,6 +177,21 @@ class MainActivity : Activity() {
         navRow.addView(openTtsTestBtn, navParams)
         navRow.addView(openSttTestBtn, navParams)
         root.addView(navRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        root.addView(createLabel("Hugging Face Token (for gated repos, e.g. Gemma):"))
+        val tokenRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tokenInput = EditText(this).apply {
+            hint = "hf_..."
+            setText(S2SModels.huggingFaceToken(this@MainActivity).orEmpty())
+        }
+        val saveTokenBtn = Button(this).apply { text = "Save" }
+        saveTokenBtn.setOnClickListener {
+            S2SModels.setHuggingFaceToken(this, tokenInput.text?.toString())
+            status.text = "Hugging Face token saved."
+        }
+        tokenRow.addView(tokenInput, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        tokenRow.addView(saveTokenBtn, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        root.addView(tokenRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         val selectionBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

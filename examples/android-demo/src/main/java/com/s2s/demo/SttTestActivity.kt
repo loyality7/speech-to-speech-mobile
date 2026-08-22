@@ -23,7 +23,6 @@ import com.s2s.mobile.audio.MicrophoneInput
 import com.s2s.mobile.config.AudioConfig
 import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
-import com.s2s.mobile.model.ModelDownloader
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
 import com.s2s.mobile.model.S2SModels
@@ -52,7 +51,7 @@ class SttTestActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var consoleLog: TextView
 
-    private val downloader by lazy { ModelDownloader(modelsDir()) }
+    private val downloader by lazy { S2SModels.downloader(this) }
 
     private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
