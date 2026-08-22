@@ -15,6 +15,7 @@ import com.s2s.mobile.llm.LlamaLanguageModel
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.LlmBackend
 import com.s2s.mobile.pipeline.SpeechRecognizer
@@ -519,11 +520,17 @@ class S2SEngine @JvmOverloads constructor(
         if (running) setState(S2SState.LISTENING)
     }
 
-    /** Injects a typed message as if the user had spoken it. */
-    fun sendText(text: String) {
+    /**
+     * Injects a typed message as if the user had spoken it.
+     *
+     * [overrides] applies to this turn's reply only — e.g. lower temperature
+     * for a factual question — and falls back to [com.s2s.mobile.config.LlmConfig]
+     * for any field left null. Does not persist past this one turn.
+     */
+    fun sendText(text: String, overrides: GenerationOverrides? = null) {
         if (text.isBlank()) return
         emit(S2SEvent.UserTranscript(text.trim(), isFinal = true))
-        beginTurn(text.trim())
+        beginTurn(text.trim(), overrides)
     }
 
     /** Registers a device capability the assistant can invoke. */
@@ -531,6 +538,13 @@ class S2SEngine @JvmOverloads constructor(
         tools.register(definition, function)
 
     fun setSystemPrompt(prompt: String) = history.setSystemPrompt(prompt)
+
+    /**
+     * Current conversation turns, verbatim plus any rolling summary — the same
+     * view [generate] sends to the model. For display, export, or debugging;
+     * mutate it via [sendText]/[resetConversation], not by editing this list.
+     */
+    fun conversationHistory(): List<ChatMessage> = history.messages()
 
     /** Switches TTS voice for subsequent replies. */
     fun selectVoice(voiceId: Int) = synthesizer.selectVoice(voiceId)
@@ -646,10 +660,10 @@ class S2SEngine @JvmOverloads constructor(
 
     // ── Turn ────────────────────────────────────────────────────────────
 
-    private fun beginTurn(userText: String) {
+    private fun beginTurn(userText: String, overrides: GenerationOverrides? = null) {
         pendingUserText = userText
         history.addUser(userText)
-        startGeneration()
+        startGeneration(overrides)
     }
 
     /**
@@ -673,7 +687,7 @@ class S2SEngine @JvmOverloads constructor(
         startGeneration()
     }
 
-    private fun startGeneration() {
+    private fun startGeneration(overrides: GenerationOverrides? = null) {
         partialReply = ""
         val turn = turns.begin()
         languageModel.cancel()
@@ -685,10 +699,10 @@ class S2SEngine @JvmOverloads constructor(
         firstTokenMs = 0
         setState(S2SState.THINKING)
 
-        llmWorker.execute { generate(turn) }
+        llmWorker.execute { generate(turn, overrides = overrides) }
     }
 
-    private fun generate(turn: Int, depth: Int = 0) {
+    private fun generate(turn: Int, depth: Int = 0, overrides: GenerationOverrides? = null) {
         if (turns.isStale(turn)) return
 
         val toolPrompt = if (config.llm.toolsEnabled) tools.promptSection() else null
@@ -719,7 +733,7 @@ class S2SEngine @JvmOverloads constructor(
                         if (config.llm.toolsEnabled) {
                             val call = tools.parse(full)
                             if (call != null) {
-                                runTool(turn, call.name, full, depth)
+                                runTool(turn, call.name, full, depth, overrides)
                                 return
                             }
                             // Not a tool call after all: speak it now.
@@ -750,6 +764,7 @@ class S2SEngine @JvmOverloads constructor(
                         if (running) setState(S2SState.LISTENING)
                     }
                 },
+                overrides,
             )
         } catch (e: Throwable) {
             if (!turns.isStale(turn)) {
@@ -783,7 +798,7 @@ class S2SEngine @JvmOverloads constructor(
         partialReply = ""
     }
 
-    private fun runTool(turn: Int, name: String, raw: String, depth: Int = 0) {
+    private fun runTool(turn: Int, name: String, raw: String, depth: Int = 0, overrides: GenerationOverrides? = null) {
         if (depth >= MAX_TOOL_RECURSION_DEPTH) {
             Log.w(TAG, "Tool recursion depth $depth reached max limit $MAX_TOOL_RECURSION_DEPTH for tool $name")
             emit(S2SEvent.Error("Tool recursion depth exceeded maximum limit ($MAX_TOOL_RECURSION_DEPTH)"))
@@ -810,7 +825,7 @@ class S2SEngine @JvmOverloads constructor(
         // user hearing silence after a successful action.
         history.addToolResult(name, result.output)
         chunker.reset()
-        llmWorker.execute { generate(turn, depth + 1) }
+        llmWorker.execute { generate(turn, depth + 1, overrides) }
     }
 
     private fun speak(turn: Int, sentence: String) {

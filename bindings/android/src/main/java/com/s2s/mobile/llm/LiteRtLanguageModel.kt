@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.s2s.mobile.config.LlmConfig
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.TokenSink
 import java.io.File
@@ -71,7 +72,7 @@ class LiteRtLanguageModel(
         loaded = false
     }
 
-    override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
+    override fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides?) {
         val eng = engine
         if (!loaded || eng == null) {
             sink.onError("Model not loaded")
@@ -82,10 +83,11 @@ class LiteRtLanguageModel(
             sink.onComplete()
             return
         }
+        val effectiveStopSequences = overrides?.stopSequences ?: config.stopSequences
 
         try {
             runCatching { activeConversation?.close() }
-            val active = eng.createConversation(buildConfig(messages.dropLast(1)))
+            val active = eng.createConversation(buildConfig(messages.dropLast(1), overrides))
             activeConversation = active
 
             val latch = CountDownLatch(1)
@@ -101,7 +103,7 @@ class LiteRtLanguageModel(
 
                     // LiteRT-LM has no native stop-sequence support, so a match is
                     // only ever seen after it has already been generated.
-                    val stopAt = config.stopSequences.asSequence()
+                    val stopAt = effectiveStopSequences.asSequence()
                         .map { generated.indexOf(it) }
                         .filter { it >= 0 }
                         .minOrNull()
@@ -153,7 +155,7 @@ class LiteRtLanguageModel(
      * [Conversation.sendMessageAsync] once the conversation exists, matching
      * how LiteRT-LM expects to receive it.
      */
-    private fun buildConfig(history: List<ChatMessage>): ConversationConfig {
+    private fun buildConfig(history: List<ChatMessage>, overrides: GenerationOverrides? = null): ConversationConfig {
         val systemText = history.filter { it.role == "system" }
             .joinToString("\n\n") { it.content }
             .ifBlank { null }
@@ -165,11 +167,11 @@ class LiteRtLanguageModel(
             systemInstruction = systemText?.let { Contents.of(it) },
             initialMessages = turns,
             samplerConfig = SamplerConfig(
-                topK = config.topK,
-                topP = config.topP.toDouble(),
-                temperature = config.temperature.toDouble(),
+                topK = overrides?.topK ?: config.topK,
+                topP = (overrides?.topP ?: config.topP).toDouble(),
+                temperature = (overrides?.temperature ?: config.temperature).toDouble(),
             ),
-            maxOutputToken = config.maxTokens,
+            maxOutputToken = overrides?.maxTokens ?: config.maxTokens,
         )
     }
 

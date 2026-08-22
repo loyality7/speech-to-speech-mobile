@@ -40,7 +40,20 @@ class ToolRegistry : Tools {
             appendLine("You can call these tools:")
             definitions.forEach { d ->
                 append("- ").append(d.name).append(": ").append(d.description)
-                if (d.parameters.isNotEmpty()) {
+                if (d.schema.isNotEmpty()) {
+                    append(" (arguments: ")
+                    append(
+                        d.schema.entries.joinToString(", ") { (key, p) ->
+                            val flags = buildString {
+                                append(p.type)
+                                if (!p.required) append(", optional")
+                                if (p.enum.isNotEmpty()) append(", one of: ").append(p.enum.joinToString("/"))
+                            }
+                            "$key ($flags) - ${p.description}"
+                        },
+                    )
+                    append(")")
+                } else if (d.parameters.isNotEmpty()) {
                     append(" (arguments: ")
                     append(d.parameters.entries.joinToString(", ") { "${it.key} - ${it.value}" })
                     append(")")

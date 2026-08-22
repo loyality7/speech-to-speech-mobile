@@ -11,7 +11,11 @@ class MemoryTrimTest {
         var trimmed = false
         val model = object : LanguageModel {
             override fun initialize() = Result.success(Unit)
-            override fun generate(messages: List<com.s2s.mobile.pipeline.ChatMessage>, sink: com.s2s.mobile.pipeline.TokenSink) {}
+            override fun generate(
+                messages: List<com.s2s.mobile.pipeline.ChatMessage>,
+                sink: com.s2s.mobile.pipeline.TokenSink,
+                overrides: com.s2s.mobile.pipeline.GenerationOverrides?,
+            ) {}
             override fun cancel() {}
             override fun resetContext() {}
             override fun trimMemory() {

@@ -1,11 +1,13 @@
 package com.s2s.mobile.audio
 
+import android.Manifest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import com.s2s.mobile.config.AudioConfig
 import com.s2s.mobile.pipeline.AudioInput
 import kotlin.concurrent.thread
@@ -39,6 +41,7 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
     /** True once a real hardware noise suppressor instance is active. */
     val isHardwareNoiseSuppressionActive: Boolean get() = ns?.enabled == true
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     override fun start(onFrame: (FloatArray) -> Unit): Boolean {
         if (running) return true
 

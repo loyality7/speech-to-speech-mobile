@@ -6,6 +6,7 @@ import com.llamatik.library.platform.LlamaBridge
 import com.llamatik.library.platform.LlamaSession
 import com.s2s.mobile.config.LlmConfig
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.TokenSink
 import java.io.File
@@ -140,10 +141,29 @@ class LlamaLanguageModel(
         }
     }
 
-    override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
+    override fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides?) {
         if (!loaded) {
             sink.onError("Model not loaded")
             return
+        }
+        val effectiveStopSequences = overrides?.stopSequences ?: config.stopSequences
+        if (overrides != null) {
+            // Applied per-turn: the native side has no separate "this call only"
+            // knob, so this is the same call initialize() makes, just re-run with
+            // the merged params right before the stream that should use them.
+            LlamaBridge.updateGenerateParams(
+                temperature = overrides.temperature ?: config.temperature,
+                maxTokens = overrides.maxTokens ?: config.maxTokens,
+                topP = overrides.topP ?: config.topP,
+                topK = overrides.topK ?: config.topK,
+                repeatPenalty = overrides.repeatPenalty ?: config.repeatPenalty,
+                contextLength = config.contextLength,
+                numThreads = config.numThreads,
+                useMmap = config.useMmap,
+                flashAttention = config.flashAttention,
+                batchSize = config.batchSize,
+                gpuLayers = config.gpuLayers,
+            )
         }
         try {
             val entered = System.currentTimeMillis()
@@ -216,7 +236,7 @@ class LlamaLanguageModel(
                     // The native side has no concept of stop sequences, so a match is
                     // only ever seen after it has already been generated — this trims
                     // it back out of both the emitted stream and the cached tail.
-                    val stopAt = config.stopSequences.asSequence()
+                    val stopAt = effectiveStopSequences.asSequence()
                         .map { generated.indexOf(it) to it }
                         .filter { it.first >= 0 }
                         .minByOrNull { it.first }
@@ -267,6 +287,23 @@ class LlamaLanguageModel(
                 if (purgePending) {
                     purgePending = false
                     purgeCache()
+                }
+                // Overrides apply to this call only — the next turn without one
+                // should see the session's own config again, not this turn's values.
+                if (overrides != null) {
+                    LlamaBridge.updateGenerateParams(
+                        temperature = config.temperature,
+                        maxTokens = config.maxTokens,
+                        topP = config.topP,
+                        topK = config.topK,
+                        repeatPenalty = config.repeatPenalty,
+                        contextLength = config.contextLength,
+                        numThreads = config.numThreads,
+                        useMmap = config.useMmap,
+                        flashAttention = config.flashAttention,
+                        batchSize = config.batchSize,
+                        gpuLayers = config.gpuLayers,
+                    )
                 }
             }
         } catch (e: Throwable) {
