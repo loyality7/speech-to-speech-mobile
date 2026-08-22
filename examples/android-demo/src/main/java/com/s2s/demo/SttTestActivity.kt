@@ -35,8 +35,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
 
 /**
  * Dedicated Activity to test and preview STT speech-to-text models independently with direct download support.
@@ -122,7 +120,7 @@ class SttTestActivity : Activity() {
         }
         root.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        root.addView(createLabel("Select STT Model to Test:"))
+        root.addView(label("Select STT Model to Test:"))
         sttSpinner = Spinner(this)
         root.addView(sttSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
@@ -288,27 +286,14 @@ class SttTestActivity : Activity() {
                     } else {
                         val err = initRes.exceptionOrNull()
                         appendLog("ERROR: STT Recognizer initialize failed!")
-                        err?.let { appendLog(getStackTraceString(it)) }
+                        err?.let { appendLog(Log.getStackTraceString(it)) }
                     }
                 } catch (e: Throwable) {
                     appendLog("FATAL EXCEPTION in STT coroutine:")
-                    appendLog(getStackTraceString(e))
+                    appendLog(Log.getStackTraceString(e))
                 }
             }
         }
-    }
-
-    private fun getStackTraceString(t: Throwable): String {
-        val sw = StringWriter()
-        t.printStackTrace(PrintWriter(sw))
-        return sw.toString()
-    }
-
-    private fun createLabel(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(Color.GRAY)
-        setPadding(0, 8, 0, 2)
     }
 
     private fun modelsDir() = S2SModels.dir(this)

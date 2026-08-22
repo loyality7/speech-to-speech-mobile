@@ -1,7 +1,5 @@
 package com.s2s.mobile.text
 
-import com.s2s.mobile.pipeline.TextChunker
-
 /**
  * Splits a token stream into speakable sentences. Port of the Python
  * `LLM/lm_output_processor.py`.
@@ -16,12 +14,12 @@ class SentenceChunker(
     private val firstChunkMinChars: Int = 24,
     private val maxChunkChars: Int = 120,
     private val minChunkChars: Int = 20,
-) : TextChunker {
+) {
 
     private val buffer = StringBuilder()
     private var emittedCount = 0
 
-    override fun accept(token: String): List<String> {
+    fun accept(token: String): List<String> {
         if (token.isEmpty()) return emptyList()
         buffer.append(token)
 
@@ -38,14 +36,14 @@ class SentenceChunker(
         return out
     }
 
-    override fun flush(): String? {
+    fun flush(): String? {
         val rest = buffer.toString().trim()
         buffer.setLength(0)
         if (rest.isNotEmpty()) emittedCount++
         return rest.ifEmpty { null }
     }
 
-    override fun reset() {
+    fun reset() {
         buffer.setLength(0)
         emittedCount = 0
     }

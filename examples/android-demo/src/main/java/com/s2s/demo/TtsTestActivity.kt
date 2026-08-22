@@ -32,8 +32,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
 
 /**
  * Dedicated Activity to test and preview TTS voice models independently, including Kokoro multi-speaker voice selection.
@@ -122,11 +120,11 @@ class TtsTestActivity : Activity() {
         }
         root.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        root.addView(createLabel("Select TTS Model:"))
+        root.addView(label("Select TTS Model:"))
         ttsSpinner = Spinner(this)
         root.addView(ttsSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        speakerLabel = createLabel("Select Voice / Speaker Persona (Multi-Voice Models):")
+        speakerLabel = label("Select Voice / Speaker Persona (Multi-Voice Models):")
         speakerSpinner = Spinner(this)
         root.addView(speakerLabel, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         root.addView(speakerSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -152,7 +150,7 @@ class TtsTestActivity : Activity() {
         btnRow.addView(synthesizeBtn, rowParams)
         root.addView(btnRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        root.addView(createLabel("Test Speech Input:"))
+        root.addView(label("Test Speech Input:"))
         textInput = EditText(this).apply {
             setText("Hello! This is a multi-voice synthesis test with Kokoro and Piper.")
             textSize = 14f
@@ -345,30 +343,17 @@ class TtsTestActivity : Activity() {
                     } else {
                         val err = initRes.exceptionOrNull()
                         appendLog("ERROR: SherpaSynthesizer initialize failed!")
-                        err?.let { appendLog(getStackTraceString(it)) }
+                        err?.let { appendLog(Log.getStackTraceString(it)) }
                     }
                 } catch (e: Throwable) {
                     appendLog("FATAL EXCEPTION in synthesis coroutine:")
-                    appendLog(getStackTraceString(e))
+                    appendLog(Log.getStackTraceString(e))
                 }
             }
 
             isSynthesizing = false
             synthesizeBtn.text = "Synthesize & Play Voice"
         }
-    }
-
-    private fun getStackTraceString(t: Throwable): String {
-        val sw = StringWriter()
-        t.printStackTrace(PrintWriter(sw))
-        return sw.toString()
-    }
-
-    private fun createLabel(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(Color.GRAY)
-        setPadding(0, 8, 0, 2)
     }
 
     private fun modelsDir() = S2SModels.dir(this)

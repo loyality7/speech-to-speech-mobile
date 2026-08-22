@@ -19,7 +19,6 @@ import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.LlmBackend
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
-import com.s2s.mobile.pipeline.TextChunker
 import com.s2s.mobile.pipeline.TokenSink
 import com.s2s.mobile.pipeline.ToolDefinition
 import com.s2s.mobile.pipeline.ToolFunction
@@ -114,7 +113,7 @@ class S2SEngine @JvmOverloads constructor(
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
     private val audioRestorer: AudioRestorer? = defaultAudioRestorer(config),
     private val microphone: AudioInput = MicrophoneInput(config.audio),
-    private val chunker: TextChunker =
+    private val chunker: SentenceChunker =
         SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars, config.tts.minChunkChars),
     /** Register device capabilities here before [initialize] to enable tool calling. */
     val tools: Tools = ToolRegistry(),

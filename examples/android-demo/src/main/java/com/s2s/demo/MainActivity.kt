@@ -178,7 +178,7 @@ class MainActivity : Activity() {
         navRow.addView(openSttTestBtn, navParams)
         root.addView(navRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        root.addView(createLabel("Hugging Face Token (for gated repos, e.g. Gemma):"))
+        root.addView(label("Hugging Face Token (for gated repos, e.g. Gemma):", padTop = 4))
         val tokenRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val tokenInput = EditText(this).apply {
             hint = "hf_..."
@@ -206,7 +206,7 @@ class MainActivity : Activity() {
 
         val browseButtons = mutableListOf<Button>()
         fun addModelRow(label: String, spinner: Spinner, category: String) {
-            selectionBox.addView(createLabel(label))
+            selectionBox.addView(label(label, padTop = 4))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             row.addView(spinner, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             val browseBtn = Button(this).apply { text = "🔍 HF" }
@@ -224,7 +224,7 @@ class MainActivity : Activity() {
         addModelRow("STT Model:", sttSpinner, "STT")
         addModelRow("TTS Model:", ttsSpinner, "TTS")
         addModelRow("LLM Model:", llmSpinner, "LLM")
-        selectionBox.addView(createLabel("TTS Voice / Speaker:"))
+        selectionBox.addView(label("TTS Voice / Speaker:", padTop = 4))
         selectionBox.addView(voiceSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         hfBrowseButtons = browseButtons
 
@@ -268,13 +268,6 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = 12 },
         )
         return root
-    }
-
-    private fun createLabel(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(Color.GRAY)
-        setPadding(0, 4, 0, 2)
     }
 
     // Mutable per-category option lists. Start as the curated registry; a Hugging

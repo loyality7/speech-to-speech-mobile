@@ -55,18 +55,3 @@ interface LanguageModel {
     fun release()
 }
 
-/**
- * Splits a token stream into speakable sentences.
- *
- * Sentence one is synthesised while the model is still writing sentence two,
- * which is what keeps time-to-first-audio short on long replies.
- */
-interface TextChunker {
-    /** Feeds a token. Returns any sentences that just became complete. */
-    fun accept(token: String): List<String>
-
-    /** Returns whatever is left when generation ends. */
-    fun flush(): String?
-
-    fun reset()
-}
