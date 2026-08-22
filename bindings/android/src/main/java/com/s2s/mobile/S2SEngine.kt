@@ -111,6 +111,21 @@ class S2SEngine @JvmOverloads constructor(
 
     private val turns = TurnGuard()
     private val bargeInGate = BargeInGate(config.vad.bargeInFrames, config.vad.bargeInGraceMs)
+
+    /**
+     * Same debounce as [bargeInGate] (requiredFrames, no grace needed — nothing
+     * is playing while LISTENING) but for the SpeechStarted UI signal rather
+     * than an interruption.
+     */
+    private val speechActivityGate = BargeInGate(config.vad.bargeInFrames, graceMs = 0)
+
+    /**
+     * [speechActivityGate] fires once per threshold-crossing, not once per
+     * utterance — a brief VAD flicker mid-speech re-crosses it and would emit a
+     * second SpeechStarted with no SpeechEnded between them. This suppresses that.
+     */
+    @Volatile
+    private var speechActive = false
     private var speaker: AudioOutput? = null
 
     // Generation and synthesis run on separate threads so sentence two is being
@@ -292,6 +307,7 @@ class S2SEngine @JvmOverloads constructor(
         speaker?.start()
         recognizer.reset()
         vad.reset()
+        speechActivityGate.reset()
         chunker.reset()
         synthesisDone = true
 
@@ -506,17 +522,35 @@ class S2SEngine @JvmOverloads constructor(
             resetRecognitionPending = false
             recognizer.reset()
             vad.reset()
+            speechActivityGate.reset()
         }
 
         when (_state.value) {
-            S2SState.LISTENING -> when (val heard = recognizer.accept(frame)) {
-                is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
-                is Transcript.Final -> {
-                    val text = normalizeForModel(heard.text)
-                    emit(S2SEvent.UserTranscript(text, isFinal = true))
-                    beginTurn(text)
+            S2SState.LISTENING -> {
+                // Feeding the VAD here too (not just during SPEAKING for
+                // barge-in) is what makes SpeechStarted possible, and keeps its
+                // internal state warm rather than cold-starting each time
+                // playback begins.
+                if (!speechActive && config.vad.bargeInEnabled &&
+                    speechActivityGate.onFrame(vad.accept(frame), 0)
+                ) {
+                    speechActive = true
+                    emit(S2SEvent.SpeechStarted)
                 }
-                Transcript.Nothing -> Unit
+                when (val heard = recognizer.accept(frame)) {
+                    is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
+                    is Transcript.Final -> {
+                        speechActivityGate.reset()
+                        if (speechActive) {
+                            speechActive = false
+                            emit(S2SEvent.SpeechEnded)
+                        }
+                        val text = normalizeForModel(heard.text)
+                        emit(S2SEvent.UserTranscript(text, isFinal = true))
+                        beginTurn(text)
+                    }
+                    Transcript.Nothing -> Unit
+                }
             }
 
             // Nothing is playing yet, so there is nothing to barge into. Keep

@@ -604,6 +604,8 @@ class MainActivity : Activity() {
                     is S2SEvent.AssistantDone -> transcript.append("\n\n")
                     is S2SEvent.StateChanged -> status.text = event.state.name
                     S2SEvent.BargeIn -> transcript.append("  [interrupted]\n")
+                    S2SEvent.SpeechStarted -> Unit
+                    S2SEvent.SpeechEnded -> Unit
                     is S2SEvent.Metrics ->
                         status.text = "TTFT: ${event.metrics.timeToFirstTokenMs}ms · " +
                             "TTFA: ${event.metrics.timeToFirstAudioMs}ms"

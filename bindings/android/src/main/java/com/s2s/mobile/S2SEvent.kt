@@ -41,6 +41,16 @@ sealed interface S2SEvent {
     /** The user talked over the assistant and cut it off. */
     data object BargeIn : S2SEvent
 
+    /**
+     * Live voice-activity signal while [S2SState.LISTENING], for a UI that wants
+     * to show a waveform or mic pulse rather than wait for a transcript.
+     * Debounced the same way barge-in is, so a click or cough does not fire it.
+     */
+    data object SpeechStarted : S2SEvent
+
+    /** The utterance that [SpeechStarted] announced has settled into a transcript. */
+    data object SpeechEnded : S2SEvent
+
     /** Emitted once per turn, when the first audio chunk reaches the speaker. */
     data class Metrics(val metrics: TurnMetrics) : S2SEvent
 
