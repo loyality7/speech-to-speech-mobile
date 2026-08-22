@@ -13,4 +13,10 @@ data class S2SConfig(
     val stt: SttConfig = SttConfig(),
     val llm: LlmConfig = LlmConfig(),
     val tts: TtsConfig = TtsConfig(),
+    /**
+     * Runs a silent warmup pass over VAD, STT and the LLM during [initialize],
+     * so the first real turn does not pay ONNX graph allocation and KV session
+     * setup on top of inference. TTS warms itself already via [TtsConfig.warmUp].
+     */
+    val warmUpOnInit: Boolean = true,
 )
