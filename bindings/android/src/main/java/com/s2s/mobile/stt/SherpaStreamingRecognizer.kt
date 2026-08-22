@@ -104,7 +104,7 @@ class SherpaStreamingRecognizer(
 
         recognizer = OnlineRecognizer(
             config = OnlineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = audioConfig.sampleRate, featureDim = 80),
+                featConfig = FeatureConfig(sampleRate = audioConfig.sampleRate, featureDim = sttConfig.featureDim),
                 modelConfig = model,
                 endpointConfig = EndpointConfig(
                     // Nothing said yet — wait longer before abandoning the turn.

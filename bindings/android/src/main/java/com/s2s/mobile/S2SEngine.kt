@@ -96,7 +96,7 @@ private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
  * to the constructor.
  *
  * ```kotlin
- * val engine = S2SEngine(S2SConfig(models = ModelPaths(...)))
+ * val engine = S2SEngine(context, S2SConfig(models = ModelPaths(...)))
  * engine.initialize().getOrThrow()   // slow: call off the main thread
  * engine.start()
  * lifecycleScope.launch { engine.events.collect { render(it) } }
@@ -151,6 +151,18 @@ class S2SEngine @JvmOverloads constructor(
 
     private val _state = MutableStateFlow(S2SState.IDLE)
     val state: StateFlow<S2SState> = _state.asStateFlow()
+
+    /**
+     * True once a real hardware echo canceller is active on the capture stream.
+     * False for "not requested", "unavailable on this device" and "creation
+     * failed" alike — see [MicrophoneInput.isHardwareAecActive]. Always false
+     * when [microphone] is a custom [AudioInput] implementation.
+     */
+    val isHardwareAecActive: Boolean get() = (microphone as? MicrophoneInput)?.isHardwareAecActive == true
+
+    /** Same caveats as [isHardwareAecActive], for the platform noise suppressor. */
+    val isHardwareNoiseSuppressionActive: Boolean
+        get() = (microphone as? MicrophoneInput)?.isHardwareNoiseSuppressionActive == true
 
     // 256 rather than 64 because one event per token overruns a slow collector
     // quickly. Deliberately NOT DROP_OLDEST: that makes tryEmit always succeed,
@@ -244,7 +256,7 @@ class S2SEngine @JvmOverloads constructor(
         val playbackRate = audioRestorer?.takeIf { it.sampleRate > 0 }?.sampleRate
             ?: config.audio.playbackSampleRate
             ?: synthesizer.sampleRate
-        speaker = SpeakerOutput(context, playbackRate).apply {
+        speaker = SpeakerOutput(context, playbackRate, config.audio).apply {
             onDrained = { onPlaybackDrained() }
         }
         initialized = true
@@ -315,6 +327,7 @@ class S2SEngine @JvmOverloads constructor(
                 context,
                 config.audio.serviceNotificationTitle,
                 config.audio.serviceNotificationText,
+                config.audio,
             )
             // Not fatal: capture works while the app is in front. Say so rather
             // than let the mic die later with no explanation.
@@ -390,6 +403,7 @@ class S2SEngine @JvmOverloads constructor(
                 emit(S2SEvent.AudioFocusRegained)
                 resumeAfterFocus()
             },
+            config = config.audio,
         )
         focus = controller
         if (controller.request()) return true
@@ -418,6 +432,7 @@ class S2SEngine @JvmOverloads constructor(
                 context,
                 config.audio.serviceNotificationPausedTitle,
                 config.audio.serviceNotificationPausedText,
+                config.audio,
             )
         }
         setState(S2SState.IDLE)
@@ -440,6 +455,7 @@ class S2SEngine @JvmOverloads constructor(
                 context,
                 config.audio.serviceNotificationTitle,
                 config.audio.serviceNotificationText,
+                config.audio,
             )
         }
         setState(S2SState.LISTENING)

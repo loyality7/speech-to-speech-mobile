@@ -54,13 +54,11 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
 
         val rec = try {
             AudioRecord(
-                // VOICE_COMMUNICATION routes through the platform echo canceller on
-                // most devices, which is what makes barge-in over a speaker viable.
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                audioSource(config.audioSource),
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer * 2, frameSize * 8),
+                maxOf(minBuffer * 2, frameSize * config.captureBufferFrameMultiplier),
             )
         } catch (e: Exception) {
             Log.e(TAG, "AudioRecord construction failed", e)
@@ -88,7 +86,7 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
         running = true
         rec.startRecording()
 
-        worker = thread(start = true, name = "S2S-Mic", priority = Thread.MAX_PRIORITY) {
+        worker = thread(start = true, name = "S2S-Mic", priority = config.captureThreadPriority) {
             val shorts = ShortArray(frameSize)
             val floats = FloatArray(frameSize)
             var filled = 0
@@ -134,6 +132,16 @@ class MicrophoneInput(private val config: AudioConfig) : AudioInput {
             it.release()
         }
         record = null
+    }
+
+    /** Maps [AudioConfig.audioSource]'s constant name to the real `MediaRecorder.AudioSource` int. */
+    private fun audioSource(name: String): Int = when (name) {
+        "MIC" -> MediaRecorder.AudioSource.MIC
+        "VOICE_RECOGNITION" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+        "UNPROCESSED" -> MediaRecorder.AudioSource.UNPROCESSED
+        "CAMCORDER" -> MediaRecorder.AudioSource.CAMCORDER
+        "DEFAULT" -> MediaRecorder.AudioSource.DEFAULT
+        else -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
     }
 
     private companion object {

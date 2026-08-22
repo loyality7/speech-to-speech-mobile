@@ -1,6 +1,7 @@
 package com.s2s.mobile.model
 
 import android.content.Context
+import com.s2s.mobile.config.ModelDownloadConfig
 import java.io.File
 
 /**
@@ -22,11 +23,12 @@ object S2SModels {
     private const val PREFS = "s2s_models"
     private const val KEY_HF_TOKEN = "hf_token"
 
-    fun dir(context: Context): File =
-        File(context.getExternalFilesDir(null), "models").apply { mkdirs() }
+    fun dir(context: Context, config: ModelDownloadConfig = ModelDownloadConfig()): File =
+        File(context.getExternalFilesDir(null), config.modelsDirName).apply { mkdirs() }
 
     /** Convenience for the common case of "give me a downloader wired to the right place". */
-    fun downloader(context: Context): ModelDownloader = ModelDownloader(dir(context), huggingFaceToken(context))
+    fun downloader(context: Context, config: ModelDownloadConfig = ModelDownloadConfig()): ModelDownloader =
+        ModelDownloader(dir(context, config), huggingFaceToken(context), config)
 
     /**
      * Hugging Face access token, for repositories gated behind a license

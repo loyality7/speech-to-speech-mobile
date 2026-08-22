@@ -189,9 +189,11 @@ class LlamaLanguageModel(
             cacheTail = outgoing.lastOrNull()?.content?.trim() ?: cacheTail
             val generated = StringBuilder()
             val utf8Decoder = Utf8StreamDecoder()
+            var stoppedEarly = false
 
             val callback = object : GenStream {
                 override fun onDelta(text: String) {
+                    if (stoppedEarly) return
                     val decoded = try {
                         utf8Decoder.decodeChunk(text)
                     } catch (e: Throwable) {
@@ -210,10 +212,34 @@ class LlamaLanguageModel(
                                 "first token ${System.currentTimeMillis() - built}ms after submit",
                         )
                     }
+
+                    // The native side has no concept of stop sequences, so a match is
+                    // only ever seen after it has already been generated — this trims
+                    // it back out of both the emitted stream and the cached tail.
+                    val stopAt = config.stopSequences.asSequence()
+                        .map { generated.indexOf(it) to it }
+                        .filter { it.first >= 0 }
+                        .minByOrNull { it.first }
+                    if (stopAt != null) {
+                        val (index, _) = stopAt
+                        val alreadyEmitted = generated.length - decoded.length
+                        val toEmit = decoded.take((index - alreadyEmitted).coerceAtLeast(0))
+                        if (toEmit.isNotEmpty()) sink.onToken(toEmit)
+                        generated.setLength(index)
+                        stoppedEarly = true
+                        cacheTail = generated.toString().trim().ifBlank { cacheTail }
+                        runCatching { active?.cancel() ?: LlamaBridge.nativeCancelGenerate() }
+                        sink.onComplete()
+                        return
+                    }
+
                     sink.onToken(decoded)
                 }
 
                 override fun onComplete() {
+                    // The cancel() triggered by an early stop still runs its own
+                    // onComplete callback on the native thread — already reported.
+                    if (stoppedEarly) return
                     val tail = utf8Decoder.flush()
                     if (tail.isNotEmpty()) {
                         generated.append(tail)
@@ -223,7 +249,10 @@ class LlamaLanguageModel(
                     sink.onComplete()
                 }
 
-                override fun onError(message: String) = sink.onError(message)
+                override fun onError(message: String) {
+                    if (stoppedEarly) return
+                    sink.onError(message)
+                }
             }
 
             generating = true

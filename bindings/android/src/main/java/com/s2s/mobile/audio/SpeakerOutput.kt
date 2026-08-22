@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
 import android.util.Log
+import com.s2s.mobile.config.AudioConfig
 import com.s2s.mobile.pipeline.AudioOutput
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
@@ -23,6 +24,7 @@ import kotlin.concurrent.thread
 class SpeakerOutput(
     private val context: Context,
     override val sampleRate: Int,
+    private val config: AudioConfig = AudioConfig(),
 ) : AudioOutput {
 
     private val queue = ConcurrentLinkedQueue<FloatArray>()
@@ -46,7 +48,7 @@ class SpeakerOutput(
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_FLOAT,
-        ).coerceAtLeast(4096)
+        ).coerceAtLeast(MIN_BUFFER_BYTES_FLOOR)
 
         track = AudioTrack.Builder()
             .setAudioAttributes(
@@ -64,14 +66,14 @@ class SpeakerOutput(
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build(),
             )
-            .setBufferSizeInBytes(minBuffer * 2)
+            .setBufferSizeInBytes(minBuffer * config.playbackBufferMultiplier)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
         running = true
         track?.play()
 
-        worker = thread(start = true, name = "S2S-Playback", priority = Thread.MAX_PRIORITY) {
+        worker = thread(start = true, name = "S2S-Playback", priority = config.playbackThreadPriority) {
             while (running) {
                 val chunk = queue.poll()
                 if (chunk != null) {
@@ -82,7 +84,7 @@ class SpeakerOutput(
                     active = false
                     onDrained?.invoke()
                 } else {
-                    Thread.sleep(5)
+                    Thread.sleep(config.playbackPollIntervalMs)
                 }
             }
         }
@@ -109,7 +111,7 @@ class SpeakerOutput(
 
     override fun release() {
         running = false
-        worker?.join(300)
+        worker?.join(config.releaseJoinTimeoutMs)
         worker = null
         queue.clear()
         track?.let {
@@ -167,5 +169,6 @@ class SpeakerOutput(
 
     private companion object {
         const val TAG = "S2S-Playback"
+        const val MIN_BUFFER_BYTES_FLOOR = 4096
     }
 }

@@ -9,11 +9,16 @@ package com.s2s.mobile.text
  * decimals and ellipses do not end a sentence.
  *
  * Not thread-safe — drive it from one turn at a time.
+ *
+ * The defaults below only apply if constructed directly with no arguments;
+ * [com.s2s.mobile.S2SEngine] always passes [com.s2s.mobile.config.TtsConfig]'s
+ * values instead, which is where these numbers should actually be tuned —
+ * kept identical to that config's defaults so the two never drift apart again.
  */
 class SentenceChunker(
-    private val firstChunkMinChars: Int = 24,
-    private val maxChunkChars: Int = 120,
-    private val minChunkChars: Int = 20,
+    private val firstChunkMinChars: Int = 12,
+    private val maxChunkChars: Int = 80,
+    private val minChunkChars: Int = 10,
 ) {
 
     private val buffer = StringBuilder()

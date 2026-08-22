@@ -89,20 +89,44 @@ class LiteRtLanguageModel(
             activeConversation = active
 
             val latch = CountDownLatch(1)
+            val generated = StringBuilder()
+            var stoppedEarly = false
             val callback = object : MessageCallback {
                 override fun onMessage(message: Message) {
+                    if (stoppedEarly) return
                     // Each callback is a delta chunk, not the accumulated reply so far.
                     val text = message.contents.toString()
                     if (text.isEmpty()) return
+                    generated.append(text)
+
+                    // LiteRT-LM has no native stop-sequence support, so a match is
+                    // only ever seen after it has already been generated.
+                    val stopAt = config.stopSequences.asSequence()
+                        .map { generated.indexOf(it) }
+                        .filter { it >= 0 }
+                        .minOrNull()
+                    if (stopAt != null) {
+                        val alreadyEmitted = generated.length - text.length
+                        val toEmit = text.take((stopAt - alreadyEmitted).coerceAtLeast(0))
+                        if (toEmit.isNotEmpty()) sink.onToken(toEmit)
+                        stoppedEarly = true
+                        runCatching { active.cancelProcess() }
+                        sink.onComplete()
+                        latch.countDown()
+                        return
+                    }
+
                     sink.onToken(text)
                 }
 
                 override fun onDone() {
+                    if (stoppedEarly) return
                     sink.onComplete()
                     latch.countDown()
                 }
 
                 override fun onError(throwable: Throwable) {
+                    if (stoppedEarly) return
                     // A cancellation is barge-in doing its job, not a failure —
                     // TurnGuard has already moved on by the time this arrives,
                     // so reporting it as an error would just log noise.

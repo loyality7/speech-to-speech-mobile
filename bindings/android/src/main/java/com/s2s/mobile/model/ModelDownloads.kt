@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import com.s2s.mobile.config.ModelDownloadConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,7 +26,10 @@ import kotlinx.coroutines.launch
  *
  * Tied to its Context's lifetime: call [close] when the owner is destroyed.
  */
-class ModelDownloads(private val context: Context) : AutoCloseable {
+class ModelDownloads(
+    private val context: Context,
+    private val config: ModelDownloadConfig = ModelDownloadConfig(),
+) : AutoCloseable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -84,7 +88,7 @@ class ModelDownloads(private val context: Context) : AutoCloseable {
             return
         }
         context.startForegroundService(Intent(context, ModelDownloadService::class.java))
-        s.startDownload(S2SModels.dir(context), specs)
+        s.startDownload(S2SModels.dir(context, config), specs, config)
     }
 
     fun stop() {

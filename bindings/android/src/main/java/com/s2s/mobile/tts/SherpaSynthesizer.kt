@@ -120,7 +120,7 @@ class SherpaSynthesizer(
         val started = System.currentTimeMillis()
         runCatching {
             engine.generateWithCallback(
-                text = "ok",
+                text = config.warmUpText,
                 sid = currentVoice,
                 speed = config.speed,
                 callback = object : Function1<FloatArray, Int> {

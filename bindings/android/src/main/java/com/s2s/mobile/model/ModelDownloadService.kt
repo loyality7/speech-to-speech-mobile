@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.s2s.mobile.config.ModelDownloadConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,7 @@ class ModelDownloadService : Service() {
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
     private var downloader: ModelDownloader? = null
+    private var config: ModelDownloadConfig = ModelDownloadConfig()
 
     /** Held so a second startDownload can be refused rather than orphaning the first. */
     private var job: Job? = null
@@ -45,12 +47,11 @@ class ModelDownloadService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
-    override fun onCreate() {
-        super.onCreate()
-        createNotificationChannel()
-    }
-
-    fun startDownload(modelsDir: File, specs: List<ModelSpec>) {
+    fun startDownload(
+        modelsDir: File,
+        specs: List<ModelSpec>,
+        config: ModelDownloadConfig = ModelDownloadConfig(),
+    ) {
         // Two runs would write the same .part files and the second would replace the
         // downloader reference, leaving the first uncancellable. One at a time.
         if (job?.isActive == true) {
@@ -58,10 +59,13 @@ class ModelDownloadService : Service() {
             return
         }
 
-        val downloader = ModelDownloader(modelsDir, S2SModels.huggingFaceToken(this)).also { this.downloader = it }
+        this.config = config
+        createNotificationChannel()
+        val downloader = ModelDownloader(modelsDir, S2SModels.huggingFaceToken(this), config)
+            .also { this.downloader = it }
 
         val notification = buildNotification("Starting download...", 0)
-        startForeground(NOTIFICATION_ID, notification)
+        startForeground(config.notificationId, notification)
 
         job = serviceScope.launch {
             try {
@@ -103,11 +107,11 @@ class ModelDownloadService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Model Downloads",
+                config.notificationChannelId,
+                config.notificationChannelName,
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Shows progress for ongoing speech model downloads"
+                description = config.notificationChannelDescription
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -125,10 +129,10 @@ class ModelDownloadService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, config.notificationChannelId)
             .setContentTitle("S2S Model Manager")
             .setContentText(title)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(config.notificationIconRes)
             .setProgress(100, progress, false)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -137,12 +141,10 @@ class ModelDownloadService : Service() {
 
     private fun updateNotification(title: String, progress: Int) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(title, progress))
+        manager.notify(config.notificationId, buildNotification(title, progress))
     }
 
     companion object {
         private const val TAG = "S2S-DownloadService"
-        private const val CHANNEL_ID = "s2s_model_download_channel"
-        private const val NOTIFICATION_ID = 1001
     }
 }
