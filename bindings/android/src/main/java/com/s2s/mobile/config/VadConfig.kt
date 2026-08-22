@@ -57,4 +57,11 @@ data class VadConfig(
     /** Allow the user to interrupt the assistant mid-sentence. */
     val bargeInEnabled: Boolean = true,
     val numThreads: Int = 1,
+    /**
+     * ONNX Runtime execution provider. "cpu" always works; "nnapi" hands
+     * inference to whatever accelerator (DSP/NPU/GPU) the device's NNAPI
+     * driver exposes, if any — on hardware with no real accelerator behind
+     * NNAPI this can be slower than "cpu", so it is opt-in, not default.
+     */
+    val provider: String = "cpu",
 )

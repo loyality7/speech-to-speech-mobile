@@ -43,7 +43,7 @@ class SileroVad(
                 tenVadModelConfig = TenVadModelConfig(),
                 sampleRate = audioConfig.sampleRate,
                 numThreads = vadConfig.numThreads,
-                provider = "cpu",
+                provider = vadConfig.provider,
             ),
         )
         Unit

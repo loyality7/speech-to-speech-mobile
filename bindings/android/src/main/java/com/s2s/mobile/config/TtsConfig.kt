@@ -43,4 +43,6 @@ data class TtsConfig(
      * Shortest run of text worth a synthesis call.
      */
     val minChunkChars: Int = 10,
+    /** ONNX Runtime execution provider. See [VadConfig.provider] for the tradeoff. */
+    val provider: String = "cpu",
 )

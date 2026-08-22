@@ -53,7 +53,7 @@ class SherpaSynthesizer(
                     kitten = if (config.backend == TtsBackend.KITTEN) kitten(dir) else OfflineTtsKittenModelConfig(),
                     pocket = if (config.backend == TtsBackend.POCKET) pocket(dir) else OfflineTtsPocketModelConfig(),
                     numThreads = config.numThreads,
-                    provider = "cpu",
+                    provider = config.provider,
                 ),
             ),
         )
