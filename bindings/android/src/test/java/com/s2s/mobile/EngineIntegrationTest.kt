@@ -2,6 +2,7 @@ package com.s2s.mobile
 
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
@@ -76,7 +77,7 @@ class FakeLanguageModel(private val replyText: String = "Hello user! How can I h
         return Result.success(Unit)
     }
 
-    override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
+    override fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides?) {
         generateCalled = true
         sink.onToken(replyText)
         sink.onComplete()
@@ -147,7 +148,7 @@ class EngineIntegrationTest {
     fun testFailingLanguageModelDoesNotStuckInThinking() {
         val throwingLlm = object : LanguageModel {
             override fun initialize() = Result.success(Unit)
-            override fun generate(messages: List<ChatMessage>, sink: TokenSink) {
+            override fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides?) {
                 throw RuntimeException("Simulated LLM OOM / crash")
             }
             override fun cancel() {}

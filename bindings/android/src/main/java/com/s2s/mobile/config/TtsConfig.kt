@@ -25,6 +25,8 @@ data class TtsConfig(
      * ONNX graph allocation and espeak dictionary loading.
      */
     val warmUp: Boolean = true,
+    /** Throwaway text synthesized by [warmUp]. Pick a word that exists in the target language/lexicon. */
+    val warmUpText: String = "ok",
     /** VITS and Matcha only: variation in the generated prosody. */
     val noiseScale: Float = 0.667f,
     /** VITS only: variation in phoneme duration. */

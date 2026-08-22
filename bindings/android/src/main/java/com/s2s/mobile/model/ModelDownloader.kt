@@ -1,6 +1,7 @@
 package com.s2s.mobile.model
 
 import android.util.Log
+import com.s2s.mobile.config.ModelDownloadConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
@@ -31,6 +32,7 @@ class ModelDownloader(
      * the download itself is written.
      */
     private val huggingFaceToken: String? = null,
+    private val config: ModelDownloadConfig = ModelDownloadConfig(),
 ) {
 
     /** Deletes every downloaded model — hundreds of MB, so never on the caller's thread. */
@@ -195,7 +197,7 @@ class ModelDownloader(
                     var fileBytes = 0L
                     connection.inputStream.use { input ->
                         FileOutputStream(outFile).use { output ->
-                            val buffer = ByteArray(1 shl 16)
+                            val buffer = ByteArray(config.bufferSizeBytes)
                             while (!isCancelled) {
                                 val n = input.read(buffer)
                                 if (n < 0) break
@@ -296,7 +298,7 @@ class ModelDownloader(
                         raf.setLength(0)
                     }
 
-                    val buffer = ByteArray(1 shl 16)
+                    val buffer = ByteArray(config.bufferSizeBytes)
                     while (!isCancelled) {
                         val n = input.read(buffer)
                         if (n < 0) break
@@ -432,11 +434,12 @@ class ModelDownloader(
     ): HttpURLConnection {
         var currentUrl = HuggingFaceDownloader.resolveUrl(urlStr)
         var redirects = 0
-        while (redirects < 5) {
+        while (redirects < config.maxRedirects) {
             val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = true
-                connectTimeout = 30_000
-                readTimeout = 120_000
+                connectTimeout = config.connectTimeoutMs
+                readTimeout = config.readTimeoutMs
+                setRequestProperty("User-Agent", config.userAgent)
                 if (resumeBytes > 0) {
                     setRequestProperty("Range", "bytes=$resumeBytes-")
                     // Makes the range conditional: if the resource changed, the server
@@ -457,8 +460,9 @@ class ModelDownloader(
             }
         }
         return (URL(currentUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 30_000
-            readTimeout = 120_000
+            connectTimeout = config.connectTimeoutMs
+            readTimeout = config.readTimeoutMs
+            setRequestProperty("User-Agent", config.userAgent)
             if (resumeBytes > 0) {
                 setRequestProperty("Range", "bytes=$resumeBytes-")
                 if (etag != null) setRequestProperty("If-Range", etag)
@@ -469,14 +473,15 @@ class ModelDownloader(
     }
 
     /**
-     * Only huggingface.co gets the token — a redirect can land anywhere (a CDN,
-     * in practice), and a Hugging Face access token has no business leaving
-     * Hugging Face's own domain.
+     * Only a host in [ModelDownloadConfig.huggingFaceTokenHosts] gets the token —
+     * a redirect can land anywhere (a CDN, in practice), and a Hugging Face
+     * access token has no business leaving Hugging Face's own domain (or
+     * whatever mirror/proxy the host app has explicitly allow-listed).
      */
     private fun applyHuggingFaceAuth(conn: HttpURLConnection, url: String) {
         if (huggingFaceToken.isNullOrBlank()) return
         val host = runCatching { URL(url).host }.getOrNull() ?: return
-        if (host == "huggingface.co" || host.endsWith(".huggingface.co")) {
+        if (config.huggingFaceTokenHosts.any { host == it || host.endsWith(".$it") }) {
             conn.setRequestProperty("Authorization", "Bearer $huggingFaceToken")
         }
     }
@@ -489,7 +494,7 @@ class ModelDownloader(
         destination.mkdirs()
         var totalExtractedBytes = 0L
         var lastEmittedBytes = 0L
-        val buffer = ByteArray(1 shl 16)
+        val buffer = ByteArray(config.bufferSizeBytes)
 
         TarArchiveInputStream(
             BZip2CompressorInputStream(BufferedInputStream(archive.inputStream())),
@@ -534,7 +539,7 @@ class ModelDownloader(
     private fun calculateSha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
-            val buffer = ByteArray(1 shl 16)
+            val buffer = ByteArray(config.bufferSizeBytes)
             while (true) {
                 val read = input.read(buffer)
                 if (read <= 0) break

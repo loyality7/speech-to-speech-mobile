@@ -5,8 +5,32 @@ import org.json.JSONObject
 /**
  * Registry of on-device model specifications loaded from `models_registry.json`.
  * No model URLs or metadata are hardcoded in Kotlin.
+ *
+ * A consuming app that wants its own model catalog (a private CDN, a curated
+ * subset, additional entries) calls [useRegistry] with its own JSON before
+ * touching any other member — the bundled `models_registry.json` is only the
+ * default, not a hardcoded ceiling.
  */
 object ModelRegistry {
+
+    private var override: Registry? = null
+
+    /**
+     * Replaces the registry with [jsonString] (same schema as the bundled
+     * `models_registry.json`). Must be called before [ALL_MODELS] or any other
+     * member is first read — once the registry has been parsed, later calls to
+     * this function still take effect for subsequent reads, but anything that
+     * already resolved a [ModelSpec] (e.g. a screen's currently-selected model)
+     * keeps its old reference.
+     */
+    fun useRegistry(jsonString: String) {
+        override = load(jsonString)
+    }
+
+    /** Restores the bundled `models_registry.json`, undoing [useRegistry]. */
+    fun useDefaultRegistry() {
+        override = null
+    }
 
     val ALL_MODELS: List<ModelSpec> get() = parsed.models
     val DEFAULT_STACK: List<ModelSpec> get() = parsed.defaultStack
@@ -26,7 +50,7 @@ object ModelRegistry {
         DEFAULT_STACK.firstOrNull { it.category == category }
             ?: error("models_registry.json default_stack names no $category model")
 
-    private val parsed: Registry by lazy {
+    private val bundled: Registry by lazy {
         val text = ModelRegistry::class.java.classLoader
             ?.getResourceAsStream("models_registry.json")
             ?.bufferedReader()?.use { it.readText() }
@@ -34,9 +58,11 @@ object ModelRegistry {
         load(text)
     }
 
+    private val parsed: Registry get() = override ?: bundled
+
     private class Registry(val models: List<ModelSpec>, val defaultStack: List<ModelSpec>)
 
-    /** Visible for tests. */
+    /** Parses [jsonString] without installing it — used by [useRegistry] and by tests. */
     fun loadFromJson(jsonString: String): List<ModelSpec> = load(jsonString).models
 
     private fun load(jsonString: String): Registry {

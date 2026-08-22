@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.s2s.mobile.config.AudioConfig
 
 /**
  * Keeps the microphone alive while the app is not in the foreground.
@@ -35,19 +36,25 @@ class VoiceSessionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createChannel()
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Listening"
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Voice assistant is active"
+        val channelId = intent?.getStringExtra(EXTRA_CHANNEL_ID) ?: DEFAULT_CHANNEL_ID
+        val notificationId = intent?.getIntExtra(EXTRA_NOTIFICATION_ID, DEFAULT_NOTIFICATION_ID) ?: DEFAULT_NOTIFICATION_ID
+        val importance = intent?.getStringExtra(EXTRA_IMPORTANCE) ?: "LOW"
+        val iconRes = intent?.getIntExtra(EXTRA_ICON_RES, android.R.drawable.ic_btn_speak_now)
+            ?: android.R.drawable.ic_btn_speak_now
+
+        createChannel(channelId, importance)
 
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
-                    NOTIFICATION_ID,
-                    notification(title, text),
+                    notificationId,
+                    notification(channelId, iconRes, title, text),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
                 )
             } else {
-                startForeground(NOTIFICATION_ID, notification(title, text))
+                startForeground(notificationId, notification(channelId, iconRes, title, text))
             }
         }.onFailure {
             // Android 14+ refuses a microphone-typed service started while the app
@@ -62,17 +69,24 @@ class VoiceSessionService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun createChannel() {
+    private fun createChannel(channelId: String, importanceName: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        if (manager.getNotificationChannel(channelId) != null) return
+        val importance = when (importanceName) {
+            "HIGH" -> NotificationManager.IMPORTANCE_HIGH
+            "DEFAULT" -> NotificationManager.IMPORTANCE_DEFAULT
+            "MIN" -> NotificationManager.IMPORTANCE_MIN
+            "NONE" -> NotificationManager.IMPORTANCE_NONE
+            else -> NotificationManager.IMPORTANCE_LOW
+        }
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Voice session", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(channelId, "Voice session", importance)
                 .apply { description = "Shown while the assistant is listening" },
         )
     }
 
-    private fun notification(title: String, text: String): Notification {
+    private fun notification(channelId: String, iconRes: Int, title: String, text: String): Notification {
         val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -81,7 +95,7 @@ class VoiceSessionService : Service() {
         )
 
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(this, channelId)
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
@@ -90,7 +104,7 @@ class VoiceSessionService : Service() {
         return builder
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(iconRes)
             .setOngoing(true)
             .setContentIntent(pending)
             .build()
@@ -98,25 +112,34 @@ class VoiceSessionService : Service() {
 
     companion object {
         private const val TAG = "S2S-VoiceService"
-        private const val CHANNEL_ID = "s2s_voice_session_channel"
-        private const val NOTIFICATION_ID = 1002
+        private const val DEFAULT_CHANNEL_ID = "s2s_voice_session_channel"
+        private const val DEFAULT_NOTIFICATION_ID = 1002
         const val EXTRA_TITLE = "title"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_CHANNEL_ID = "channel_id"
+        const val EXTRA_NOTIFICATION_ID = "notification_id"
+        const val EXTRA_IMPORTANCE = "importance"
+        const val EXTRA_ICON_RES = "icon_res"
 
         /** Returns false if the service could not be started; the caller decides what that means. */
-        fun start(context: Context, title: String?, text: String?): Boolean = runCatching {
-            val intent = Intent(context, VoiceSessionService::class.java)
-                .putExtra(EXTRA_TITLE, title)
-                .putExtra(EXTRA_TEXT, text)
-            context.startForegroundService(intent)
-            true
-        }.getOrElse {
-            Log.e(TAG, "startForegroundService refused", it)
-            false
-        }
+        fun start(context: Context, title: String?, text: String?, config: AudioConfig = AudioConfig()): Boolean =
+            runCatching {
+                val intent = Intent(context, VoiceSessionService::class.java)
+                    .putExtra(EXTRA_TITLE, title)
+                    .putExtra(EXTRA_TEXT, text)
+                    .putExtra(EXTRA_CHANNEL_ID, config.notificationChannelId)
+                    .putExtra(EXTRA_NOTIFICATION_ID, config.notificationId)
+                    .putExtra(EXTRA_IMPORTANCE, config.notificationImportance)
+                    .putExtra(EXTRA_ICON_RES, config.notificationSmallIconRes)
+                context.startForegroundService(intent)
+                true
+            }.getOrElse {
+                Log.e(TAG, "startForegroundService refused", it)
+                false
+            }
 
-        fun update(context: Context, title: String?, text: String?): Boolean =
-            start(context, title, text)
+        fun update(context: Context, title: String?, text: String?, config: AudioConfig = AudioConfig()): Boolean =
+            start(context, title, text, config)
 
         fun stop(context: Context) {
             runCatching { context.stopService(Intent(context, VoiceSessionService::class.java)) }

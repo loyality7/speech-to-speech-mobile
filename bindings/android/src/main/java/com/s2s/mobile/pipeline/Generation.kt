@@ -16,6 +16,20 @@ enum class LlmBackend {
     LITERT,
 }
 
+/**
+ * Per-turn sampling overrides, applied on top of [com.s2s.mobile.config.LlmConfig]'s
+ * session-wide defaults for a single [LanguageModel.generate] call — e.g. "be more
+ * deterministic for this one factual query." Null fields fall back to the config.
+ */
+data class GenerationOverrides(
+    val temperature: Float? = null,
+    val topP: Float? = null,
+    val topK: Int? = null,
+    val repeatPenalty: Float? = null,
+    val maxTokens: Int? = null,
+    val stopSequences: List<String>? = null,
+)
+
 /** Callbacks for a streaming generation. Invoked on the caller's thread. */
 interface TokenSink {
     fun onToken(text: String)
@@ -33,7 +47,7 @@ interface TokenSink {
 interface LanguageModel {
     fun initialize(): Result<Unit>
 
-    fun generate(messages: List<ChatMessage>, sink: TokenSink)
+    fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides? = null)
 
     fun cancel()
 

@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.util.Log
+import com.s2s.mobile.config.AudioConfig
 
 /**
  * Holds audio focus for the length of a conversation and reports when it is lost.
@@ -22,6 +23,7 @@ class AudioFocusController(
     private val onLoss: () -> Unit,
     private val onTransientLoss: () -> Unit,
     private val onRegained: () -> Unit,
+    private val config: AudioConfig = AudioConfig(),
 ) {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -72,7 +74,7 @@ class AudioFocusController(
             // Without this the listener is never told about a transient loss, and
             // the engine would keep talking through a phone call.
             .setOnAudioFocusChangeListener(listener)
-            .setWillPauseWhenDucked(true)
+            .setWillPauseWhenDucked(config.pauseOnDuck)
             .build()
 
         request = req

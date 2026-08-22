@@ -77,4 +77,20 @@ data class SttConfig(
     val hotwordsScore: Float = 1.5f,
     /** ONNX Runtime execution provider. See [VadConfig.provider] for the tradeoff. */
     val provider: String = "cpu",
+    /**
+     * Feature extractor output dimension. 80 fits every bundled model family;
+     * only change this alongside a model that documents a different value.
+     */
+    val featureDim: Int = 80,
+    /**
+     * Spoken/target language for [SttBackend.CANARY] (ISO 639-1, e.g. "en",
+     * "de", "es", "fr"). Translation is not wired here — [targetLanguage]
+     * exists so a caller can still ask Canary to transcribe in a different
+     * language than [language], but src != tgt has not been device-tested.
+     * Ignored by every other backend.
+     */
+    val language: String = "en",
+    val targetLanguage: String = language,
+    /** Canary only: restore punctuation/casing in the transcript. */
+    val punctuation: Boolean = true,
 )

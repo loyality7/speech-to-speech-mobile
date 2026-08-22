@@ -13,11 +13,21 @@ data class LlmConfig(
      * 100 characters here costs about 0.6 s before the assistant speaks.
      */
     val systemPrompt: String = "Talk Freely, but don't be rude. You are a helpful assistant.",
+    /** Sampling temperature. Lower is more deterministic/repetitive, higher is more varied/erratic. */
     val temperature: Float = 0.7f,
+    /** Nucleus sampling cutoff — only tokens within this cumulative probability mass are considered. */
     val topP: Float = 0.95f,
+    /** Only the top-K most likely tokens are considered before top-P is applied. */
     val topK: Int = 40,
+    /** Multiplies down the probability of tokens already used recently. 1.0 disables it. */
     val repeatPenalty: Float = 1.1f,
     val maxTokens: Int = 256,
+    /**
+     * Strings that end generation early when produced, checked against the
+     * running output. Empty disables the check. Useful for models that don't
+     * reliably emit their own end-of-turn token.
+     */
+    val stopSequences: List<String> = emptyList(),
     val contextLength: Int = 2048,
     /**
      * Generation threads.

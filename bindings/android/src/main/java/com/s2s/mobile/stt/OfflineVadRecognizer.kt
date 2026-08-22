@@ -75,7 +75,7 @@ class OfflineVadRecognizer(
                         vadConfig.maxSpeechSeconds,
                     ),
                     sampleRate = audioConfig.sampleRate,
-                    numThreads = 1,
+                    numThreads = vadConfig.numThreads,
                     provider = vadConfig.provider,
                 )
                 VadBackend.SILERO -> VadModelConfig(
@@ -89,7 +89,7 @@ class OfflineVadRecognizer(
                     ),
                     tenVadModelConfig = TenVadModelConfig(),
                     sampleRate = audioConfig.sampleRate,
-                    numThreads = 1,
+                    numThreads = vadConfig.numThreads,
                     provider = vadConfig.provider,
                 )
             },
@@ -139,15 +139,13 @@ class OfflineVadRecognizer(
                 canary = OfflineCanaryModelConfig(
                     encoder = pick(dir, "encoder"),
                     decoder = pick(dir, "decoder"),
-                    // Translation is not wired here; src/tgt pinned to the same
-                    // language keeps this a transcriber, not a translator.
-                    srcLang = "en",
-                    tgtLang = "en",
-                    usePnc = true,
+                    srcLang = sttConfig.language,
+                    tgtLang = sttConfig.targetLanguage,
+                    usePnc = sttConfig.punctuation,
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             else -> error("${sttConfig.backend} is a streaming backend; use SherpaStreamingRecognizer")
@@ -155,9 +153,9 @@ class OfflineVadRecognizer(
 
         recognizer = OfflineRecognizer(
             config = OfflineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = audioConfig.sampleRate, featureDim = 80),
+                featConfig = FeatureConfig(sampleRate = audioConfig.sampleRate, featureDim = sttConfig.featureDim),
                 modelConfig = model,
-                decodingMethod = "greedy_search",
+                decodingMethod = sttConfig.decodingMethod,
             ),
         )
         Unit

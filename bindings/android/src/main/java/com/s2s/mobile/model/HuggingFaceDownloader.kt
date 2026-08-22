@@ -1,6 +1,7 @@
 package com.s2s.mobile.model
 
 import android.util.Log
+import com.s2s.mobile.config.ModelDownloadConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -57,12 +58,13 @@ object HuggingFaceDownloader {
     suspend fun fetchRepositoryFiles(
         repo: String,
         revision: String = "main",
+        config: ModelDownloadConfig = ModelDownloadConfig(),
     ): List<HuggingFaceFile> = withContext(Dispatchers.IO) {
         val apiUrl = "$HF_API_BASE/$repo/tree/$revision"
         val connection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", "S2S-Mobile-SDK/1.1")
+            connectTimeout = config.connectTimeoutMs
+            readTimeout = config.readTimeoutMs
+            setRequestProperty("User-Agent", config.userAgent)
         }
 
         try {
@@ -161,14 +163,15 @@ object HuggingFaceDownloader {
         query: String,
         limit: Int = 20,
         libraryFilter: String? = null,
+        config: ModelDownloadConfig = ModelDownloadConfig(),
     ): List<HuggingFaceRepoInfo> = withContext(Dispatchers.IO) {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val filterParam = if (libraryFilter != null) "&filter=$libraryFilter" else ""
         val apiUrl = "$HF_API_BASE?search=$encodedQuery&sort=downloads&direction=-1&limit=$limit$filterParam"
         val connection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", "S2S-Mobile-SDK/1.1")
+            connectTimeout = config.connectTimeoutMs
+            readTimeout = config.readTimeoutMs
+            setRequestProperty("User-Agent", config.userAgent)
         }
 
         try {
