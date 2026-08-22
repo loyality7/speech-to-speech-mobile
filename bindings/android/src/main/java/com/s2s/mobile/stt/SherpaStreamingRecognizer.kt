@@ -55,7 +55,7 @@ class SherpaStreamingRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
                 // Left empty on purpose: sherpa reads the family from the encoder
                 // metadata. Asserting "zipformer2" makes it use a loader that
                 // expects metadata the original zipformer models do not carry,
@@ -69,7 +69,7 @@ class SherpaStreamingRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             SttBackend.PARAFORMER -> OnlineModelConfig(
@@ -79,7 +79,7 @@ class SherpaStreamingRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             SttBackend.NEMO_CTC -> OnlineModelConfig(
@@ -88,7 +88,7 @@ class SherpaStreamingRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             else -> error("${sttConfig.backend} is an offline backend; use OfflineVadRecognizer")

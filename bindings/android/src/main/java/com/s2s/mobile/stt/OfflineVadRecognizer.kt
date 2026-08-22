@@ -75,7 +75,7 @@ class OfflineVadRecognizer(
                     ),
                     sampleRate = audioConfig.sampleRate,
                     numThreads = 1,
-                    provider = "cpu",
+                    provider = vadConfig.provider,
                 )
                 VadBackend.SILERO -> VadModelConfig(
                     sileroVadModelConfig = SileroVadModelConfig(
@@ -89,7 +89,7 @@ class OfflineVadRecognizer(
                     tenVadModelConfig = TenVadModelConfig(),
                     sampleRate = audioConfig.sampleRate,
                     numThreads = 1,
-                    provider = "cpu",
+                    provider = vadConfig.provider,
                 )
             },
         )
@@ -107,7 +107,7 @@ class OfflineVadRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             SttBackend.PARAKEET_TDT -> OfflineModelConfig(
@@ -118,7 +118,7 @@ class OfflineVadRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
                 // Parakeet is a NeMo transducer; the generic transducer loader
                 // reads different metadata and fails on it.
                 modelType = "nemo_transducer",
@@ -131,7 +131,7 @@ class OfflineVadRecognizer(
                 ),
                 tokens = tokens.absolutePath,
                 numThreads = sttConfig.numThreads,
-                provider = "cpu",
+                provider = sttConfig.provider,
             )
 
             else -> error("${sttConfig.backend} is a streaming backend; use SherpaStreamingRecognizer")

@@ -68,4 +68,6 @@ data class SttConfig(
     /** Bias the recogniser toward these phrases, one per line. Empty to disable. */
     val hotwords: List<String> = emptyList(),
     val hotwordsScore: Float = 1.5f,
+    /** ONNX Runtime execution provider. See [VadConfig.provider] for the tradeoff. */
+    val provider: String = "cpu",
 )

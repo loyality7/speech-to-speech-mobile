@@ -43,7 +43,7 @@ class TenVad(
                 ),
                 sampleRate = audioConfig.sampleRate,
                 numThreads = vadConfig.numThreads,
-                provider = "cpu",
+                provider = vadConfig.provider,
             ),
         )
         Unit
