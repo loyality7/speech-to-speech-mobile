@@ -16,4 +16,10 @@ data class ModelPaths(
     val llmModel: String,
     /** Directory holding a sherpa-onnx TTS bundle matching [TtsConfig.backend]. */
     val ttsDir: String,
+    /**
+     * DPDFNet 48kHz HR speech-enhancement ONNX file, only read when
+     * [TtsConfig.enableHdAudioRestorer] is true. Null disables the feature
+     * regardless of the flag, since there is nothing to load.
+     */
+    val hdAudioRestorerModel: String? = null,
 )

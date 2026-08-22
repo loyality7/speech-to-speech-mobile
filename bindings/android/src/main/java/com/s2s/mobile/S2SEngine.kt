@@ -28,6 +28,7 @@ import com.s2s.mobile.pipeline.Transcript
 import com.s2s.mobile.pipeline.VoiceActivityDetector
 import com.s2s.mobile.stt.OfflineVadRecognizer
 import com.s2s.mobile.stt.SherpaStreamingRecognizer
+import com.s2s.mobile.tts.AudioRestorer
 import com.s2s.mobile.text.SentenceChunker
 import com.s2s.mobile.tools.ToolRegistry
 import com.s2s.mobile.tts.SherpaSynthesizer
@@ -41,6 +42,21 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
+
+/**
+ * Builds the opt-in post-TTS audio restorer (#63) only when both the feature
+ * flag and a real model path are set — a flag with no model, or a model path
+ * with the flag off, both mean "not active."
+ *
+ * Device-measured: 64ms-2.3s per chunk on DPDFNet 48kHz, far past the <5ms
+ * target. Left disabled by default; do not enable in production until a
+ * faster model or an async/prefetch path exists.
+ */
+private fun defaultAudioRestorer(config: S2SConfig): AudioRestorer? {
+    if (!config.tts.enableHdAudioRestorer) return null
+    val path = config.models.hdAudioRestorerModel ?: return null
+    return AudioRestorer(path)
+}
 
 /** Picks the [LanguageModel] implementation [LlmConfig.backend] requires. */
 private fun defaultLanguageModel(config: S2SConfig): LanguageModel =
@@ -96,6 +112,7 @@ class S2SEngine @JvmOverloads constructor(
     private val recognizer: SpeechRecognizer = defaultRecognizer(config),
     private val languageModel: LanguageModel = defaultLanguageModel(config),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
+    private val audioRestorer: AudioRestorer? = defaultAudioRestorer(config),
     private val microphone: AudioInput = MicrophoneInput(config.audio),
     private val chunker: TextChunker =
         SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars, config.tts.minChunkChars),
@@ -218,10 +235,17 @@ class S2SEngine @JvmOverloads constructor(
         recognizer.initialize().getOrThrow()
         synthesizer.initialize().getOrThrow()
         languageModel.initialize().getOrThrow()
+        audioRestorer?.initialize()?.getOrThrow()
 
         if (config.warmUpOnInit) warmUpStages()
 
-        speaker = SpeakerOutput(context, config.audio.playbackSampleRate ?: synthesizer.sampleRate).apply {
+        // The restorer's own output rate wins when active — playing its 48kHz
+        // output through a track built for the TTS model's native rate would
+        // pitch-shift every reply.
+        val playbackRate = audioRestorer?.takeIf { it.sampleRate > 0 }?.sampleRate
+            ?: config.audio.playbackSampleRate
+            ?: synthesizer.sampleRate
+        speaker = SpeakerOutput(context, playbackRate).apply {
             onDrained = { onPlaybackDrained() }
         }
         initialized = true
@@ -447,6 +471,7 @@ class S2SEngine @JvmOverloads constructor(
         runCatching { vad.release() }.onFailure { Log.w(TAG, "vad release", it) }
         runCatching { synthesizer.release() }.onFailure { Log.w(TAG, "synthesizer release", it) }
         runCatching { languageModel.release() }.onFailure { Log.w(TAG, "llm release", it) }
+        runCatching { audioRestorer?.release() }.onFailure { Log.w(TAG, "audio restorer release", it) }
         speaker = null
         initialized = false
     }
@@ -797,7 +822,8 @@ class S2SEngine @JvmOverloads constructor(
                     emit(S2SEvent.Metrics(metrics))
                     setState(S2SState.SPEAKING)
                 }
-                speaker?.write(chunk)
+                val toPlay = audioRestorer?.restore(chunk, synthesizer.sampleRate) ?: chunk
+                speaker?.write(toPlay)
             }
         }
     }
