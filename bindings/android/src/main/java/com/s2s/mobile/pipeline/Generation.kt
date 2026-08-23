@@ -11,9 +11,6 @@ data class ChatMessage(val role: String, val content: String)
 enum class LlmBackend {
     /** llama.cpp via Llamatik. GGUF Q4/Q5/Q8 checkpoints. */
     LLAMA_CPP,
-
-    /** Google's LiteRT-LM. Single `.litertlm` checkpoints. */
-    LITERT,
 }
 
 /**

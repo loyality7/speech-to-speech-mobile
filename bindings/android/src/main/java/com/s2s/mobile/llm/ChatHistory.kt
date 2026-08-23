@@ -65,7 +65,7 @@ class ChatHistory(
             // Trimming can leave a leading assistant message with no user turn
             // before it, when an odd number of messages was removed — invalid
             // for backends that enforce strict user/assistant alternation
-            // (LiteRT-LM does; llama.cpp just concatenates role-tagged text and
+            // (some stricter chat templates do; llama.cpp just concatenates role-tagged text and
             // never noticed). Drop it too rather than leave turns starting
             // mid-pair; it folds into the same summary as the rest of overflow.
             while (turns.isNotEmpty() && turns.first().role != "user") {

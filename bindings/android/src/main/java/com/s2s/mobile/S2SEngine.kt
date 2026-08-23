@@ -10,7 +10,6 @@ import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.internal.BargeInGate
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.llm.ChatHistory
-import com.s2s.mobile.llm.LiteRtLanguageModel
 import com.s2s.mobile.llm.LlamaLanguageModel
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
@@ -60,10 +59,7 @@ private fun defaultAudioRestorer(config: S2SConfig): AudioRestorer? {
 
 /** Picks the [LanguageModel] implementation [LlmConfig.backend] requires. */
 private fun defaultLanguageModel(config: S2SConfig): LanguageModel =
-    when (config.llm.backend) {
-        LlmBackend.LLAMA_CPP -> LlamaLanguageModel(config.llm, config.models.llmModel)
-        LlmBackend.LITERT -> LiteRtLanguageModel(config.llm, config.models.llmModel)
-    }
+    LlamaLanguageModel(config.llm, config.models.llmModel)
 
 /**
  * Picks the recogniser implementation the configured backend requires.
@@ -785,7 +781,7 @@ class S2SEngine @JvmOverloads constructor(
      * history with no reply and never gets one — the next turn then adds a
      * second consecutive user message on top of it. LlamaLanguageModel
      * tolerates that silently (a slightly malformed prompt, just slower);
-     * LiteRT-LM's chat template hard-rejects consecutive same-role messages, so
+     * Some chat templates hard-reject consecutive same-role messages, so
      * every turn after the first failure fails the same way once this happens.
      */
     private fun commitOrDropPendingTurn() {

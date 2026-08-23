@@ -219,19 +219,6 @@
       "numThreads": 4,
       "batchSize": 256,
       "maxTokens": 200
-    },
-    {
-      "id": "llm_gemma3_1b_litert",
-      "category": "LLM",
-      "name": "Gemma3 1B IT int4 LiteRT-LM (584 MB) [Experimental]",
-      "url": "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm",
-      "targetPath": "gemma3-1b-it-int4.litertlm",
-      "archive": false,
-      "approxBytes": 584417280,
-      "sha256": "1325ae366d31950f137c9c357b9fa89448b176d76998180c08ceaca78bba98be",
-      "version": "gemma3-1b-it-int4",
-      "backend": "LITERT",
-      "numThreads": 4
     }
   ]
 }
