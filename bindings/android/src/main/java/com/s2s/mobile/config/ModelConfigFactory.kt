@@ -56,10 +56,7 @@ object ModelConfigFactory {
     )
 
     fun llm(spec: ModelSpec) = LlmConfig(
-        backend = when (spec.backend) {
-            "LITERT" -> LlmBackend.LITERT
-            else -> LlmBackend.LLAMA_CPP
-        },
+        backend = LlmBackend.LLAMA_CPP,
         numThreads = spec.numThreads ?: 4,
         batchSize = spec.batchSize ?: 512,
         maxTokens = spec.maxTokens ?: 256,
