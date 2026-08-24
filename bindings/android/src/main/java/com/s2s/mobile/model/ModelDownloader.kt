@@ -356,13 +356,13 @@ class ModelDownloader(
             )
             val hash = calculateSha256(tempFile)
             if (!hash.equals(spec.sha256, ignoreCase = true)) {
-                Log.w(
-                    TAG,
-                    "SHA256 checksum mismatch for ${spec.name}: expected ${spec.sha256}, got $hash. Proceeding as byte count verified ($downloadedBytes bytes)."
-                )
-            } else {
-                Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
+                tempFile.delete()
+                etagFile.delete()
+                val errorMsg = "SHA256 checksum failed for ${spec.name}: expected ${spec.sha256}, got $hash"
+                Log.e(TAG, errorMsg)
+                throw IllegalStateException(errorMsg)
             }
+            Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
         } else if (spec.source == ModelSource.HUGGING_FACE) {
             // No checksum available from the Hugging Face API for this file (not an
             // LFS object). Content-Length was already enforced above — that is the
