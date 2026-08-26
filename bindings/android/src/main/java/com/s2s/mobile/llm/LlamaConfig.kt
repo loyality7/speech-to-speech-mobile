@@ -1,18 +1,14 @@
-package com.s2s.mobile.config
-
-import com.s2s.mobile.pipeline.LlmBackend
+package com.s2s.mobile.llm
 
 /**
- * Text generation, plus the rolling-memory policy that keeps a long
- * conversation from growing the KV cache without bound.
+ * llama.cpp-backend-specific settings for [LlamaLanguageModel].
+ *
+ * Lives beside the backend it configures, not in `config/`, because core's
+ * orchestration has no use for a temperature or a GPU layer count — only this
+ * backend does. Slated to move into the `s2s-llm` plugin repo; kept here for
+ * now so the split into stable interfaces + call-site wiring lands first.
  */
-data class LlmConfig(
-    /**
-     * Kept deliberately short. Prefill is re-run over the whole prompt every
-     * turn, measured at ~5.8 ms per character on a mid-range device, so every
-     * 100 characters here costs about 0.6 s before the assistant speaks.
-     */
-    val systemPrompt: String = "Talk Freely, but don't be rude. You are a helpful assistant.",
+data class LlamaConfig(
     /** Sampling temperature. Lower is more deterministic/repetitive, higher is more varied/erratic. */
     val temperature: Float = 0.7f,
     /** Nucleus sampling cutoff — only tokens within this cumulative probability mass are considered. */
@@ -44,25 +40,9 @@ data class LlmConfig(
     val useMmap: Boolean = true,
     val flashAttention: Boolean = false,
     /**
-     * Full turns kept verbatim before compaction kicks in.
-     *
-     * Every kept turn is re-prefilled on the next one, so this trades memory of
-     * the conversation directly against time-to-first-token.
-     */
-    val historyTurns: Int = 3,
-    /**
-     * Summarise turns that fall out of the window instead of dropping them, so
-     * the assistant still remembers what was agreed earlier in a long session.
-     */
-    val compactHistory: Boolean = true,
-    /**
      * Keep llama.cpp's KV cache between turns so each turn prefills only the new
      * user text. Without it, prefill is re-run over the whole conversation every
      * turn and response time grows linearly with chat length.
      */
     val reuseKvCache: Boolean = true,
-    /** Enable tool calling. Adds a tool description block to the system prompt. */
-    val toolsEnabled: Boolean = false,
-    /** Which on-device runtime [modelPath] targets. Must match the model file format. */
-    val backend: LlmBackend = LlmBackend.LLAMA_CPP,
 )

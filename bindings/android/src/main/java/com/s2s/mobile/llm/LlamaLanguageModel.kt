@@ -4,7 +4,6 @@ import android.util.Log
 import com.llamatik.library.platform.GenStream
 import com.llamatik.library.platform.LlamaBridge
 import com.llamatik.library.platform.LlamaSession
-import com.s2s.mobile.config.LlmConfig
 import com.s2s.mobile.pipeline.ChatMessage
 import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
@@ -19,7 +18,7 @@ import java.io.File
  * `Exception` here is what let a bad load take the whole process down.
  */
 class LlamaLanguageModel(
-    private val config: LlmConfig,
+    private val config: LlamaConfig,
     private val modelPath: String,
 ) : LanguageModel {
 

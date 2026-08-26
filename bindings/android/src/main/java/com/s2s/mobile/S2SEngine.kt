@@ -10,16 +10,17 @@ import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.internal.BargeInGate
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.llm.ChatHistory
-import com.s2s.mobile.llm.LlamaLanguageModel
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.ContextEngine
 import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
-import com.s2s.mobile.pipeline.LlmBackend
+import com.s2s.mobile.pipeline.NoopTools
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
 import com.s2s.mobile.pipeline.TokenSink
+import com.s2s.mobile.pipeline.ToolContext
 import com.s2s.mobile.pipeline.ToolDefinition
 import com.s2s.mobile.pipeline.ToolFunction
 import com.s2s.mobile.pipeline.Tools
@@ -29,7 +30,6 @@ import com.s2s.mobile.stt.OfflineVadRecognizer
 import com.s2s.mobile.stt.SherpaStreamingRecognizer
 import com.s2s.mobile.tts.AudioRestorer
 import com.s2s.mobile.text.SentenceChunker
-import com.s2s.mobile.tools.ToolRegistry
 import com.s2s.mobile.tts.SherpaSynthesizer
 import com.s2s.mobile.vad.SileroVad
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +40,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Builds the opt-in post-TTS audio restorer (#63) only when both the feature
@@ -56,10 +58,6 @@ private fun defaultAudioRestorer(config: S2SConfig): AudioRestorer? {
     val path = config.models.hdAudioRestorerModel ?: return null
     return AudioRestorer(path)
 }
-
-/** Picks the [LanguageModel] implementation [LlmConfig.backend] requires. */
-private fun defaultLanguageModel(config: S2SConfig): LanguageModel =
-    LlamaLanguageModel(config.llm, config.models.llmModel)
 
 /**
  * Picks the recogniser implementation the configured backend requires.
@@ -93,7 +91,7 @@ private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
  * to the constructor.
  *
  * ```kotlin
- * val engine = S2SEngine(context, S2SConfig(models = ModelPaths(...)))
+ * val engine = S2SEngine(context, S2SConfig(models = ModelPaths(...)), languageModel = myLanguageModel)
  * engine.initialize().getOrThrow()   // slow: call off the main thread
  * engine.start()
  * lifecycleScope.launch { engine.events.collect { render(it) } }
@@ -104,23 +102,42 @@ private fun defaultRecognizer(config: S2SConfig): SpeechRecognizer =
 class S2SEngine @JvmOverloads constructor(
     private val context: Context,
     private val config: S2SConfig,
+    /** The text-generation backend. No default — core has no concrete [LanguageModel] of its own; supply one from a plugin (e.g. `s2s-llm`). */
+    private val languageModel: LanguageModel,
     private val vad: VoiceActivityDetector = defaultVad(config),
     private val recognizer: SpeechRecognizer = defaultRecognizer(config),
-    private val languageModel: LanguageModel = defaultLanguageModel(config),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
     private val audioRestorer: AudioRestorer? = defaultAudioRestorer(config),
     private val microphone: AudioInput = MicrophoneInput(config.audio),
     private val chunker: SentenceChunker =
         SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars, config.tts.minChunkChars),
-    /** Register device capabilities here before [initialize] to enable tool calling. */
-    val tools: Tools = ToolRegistry(),
+    /**
+     * Register device capabilities here before [initialize] to enable tool calling.
+     * Defaults to [NoopTools] — a real [Tools] implementation (e.g. `ToolRegistry`,
+     * or a plugin's own) must be supplied for tool calling to do anything.
+     */
+    val tools: Tools = NoopTools,
+    /**
+     * Identifies this conversation to every [ToolContext] a tool call receives.
+     * Pass the ID of a conversation being resumed; omit to start a fresh one.
+     */
+    sessionId: String = UUID.randomUUID().toString(),
+    /**
+     * Conversation memory. Defaults to [ChatHistory] — a bounded in-memory
+     * deque with rolling summarisation. Supply a different [ContextEngine]
+     * (e.g. from a future memory plugin) to change how the engine remembers
+     * a conversation without changing anything else here.
+     */
+    private val history: ContextEngine = ChatHistory(
+        systemPrompt = config.generation.systemPrompt,
+        keepTurns = config.generation.historyTurns,
+        compact = config.generation.compactHistory,
+    ),
 ) {
 
-    private val history = ChatHistory(
-        systemPrompt = config.llm.systemPrompt,
-        keepTurns = config.llm.historyTurns,
-        compact = config.llm.compactHistory,
-    )
+    private val sessionId: String = sessionId
+
+    private val callSequence = AtomicLong(0)
 
     private val turns = TurnGuard()
     private val bargeInGate = BargeInGate(config.vad.bargeInFrames, config.vad.bargeInGraceMs)
@@ -520,8 +537,8 @@ class S2SEngine @JvmOverloads constructor(
      * Injects a typed message as if the user had spoken it.
      *
      * [overrides] applies to this turn's reply only — e.g. lower temperature
-     * for a factual question — and falls back to [com.s2s.mobile.config.LlmConfig]
-     * for any field left null. Does not persist past this one turn.
+     * for a factual question — and falls back to the [languageModel]'s own
+     * defaults for any field left null. Does not persist past this one turn.
      */
     fun sendText(text: String, overrides: GenerationOverrides? = null) {
         if (text.isBlank()) return
@@ -701,7 +718,7 @@ class S2SEngine @JvmOverloads constructor(
     private fun generate(turn: Int, depth: Int = 0, overrides: GenerationOverrides? = null) {
         if (turns.isStale(turn)) return
 
-        val toolPrompt = if (config.llm.toolsEnabled) tools.promptSection() else null
+        val toolPrompt = if (config.generation.toolsEnabled) tools.promptSection() else null
         val reply = StringBuilder()
 
         try {
@@ -717,7 +734,7 @@ class S2SEngine @JvmOverloads constructor(
                         // A tool call must not be spoken aloud, and it only becomes
                         // recognisable once the object closes — so hold synthesis
                         // until completion when tools are on.
-                        if (!config.llm.toolsEnabled) {
+                        if (!config.generation.toolsEnabled) {
                             chunker.accept(text).forEach { speak(turn, it) }
                         }
                     }
@@ -726,7 +743,7 @@ class S2SEngine @JvmOverloads constructor(
                         if (turns.isStale(turn)) return
                         val full = reply.toString()
 
-                        if (config.llm.toolsEnabled) {
+                        if (config.generation.toolsEnabled) {
                             val call = tools.parse(full)
                             if (call != null) {
                                 runTool(turn, call.name, full, depth, overrides)
@@ -803,7 +820,12 @@ class S2SEngine @JvmOverloads constructor(
         }
 
         val call = tools.parse(raw) ?: return
-        val result = tools.execute(call)
+        val toolContext = ToolContext(
+            sessionId = sessionId,
+            turnId = turn.toString(),
+            callId = callSequence.incrementAndGet().toString(),
+        )
+        val result = tools.execute(call, toolContext)
         emit(S2SEvent.ToolExecuted(name, result.output, result.isError))
         if (turns.isStale(turn)) return
 

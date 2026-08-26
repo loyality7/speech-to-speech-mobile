@@ -83,7 +83,8 @@ dependencies {
     // llama.cpp runtime for on-device LLM generation.
     api("com.llamatik:library:1.7.0")
 
-    // Optional pluggable LLM backend removed: SDK is now GGUF/llama.cpp-only
+    // Remote OpenAI-compat LLM backend (SSE streaming chat-completions)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
 

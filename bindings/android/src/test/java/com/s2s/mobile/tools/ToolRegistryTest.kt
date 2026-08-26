@@ -1,6 +1,7 @@
 package com.s2s.mobile.tools
 
 import com.s2s.mobile.pipeline.ToolCall
+import com.s2s.mobile.pipeline.ToolContext
 import com.s2s.mobile.pipeline.ToolDefinition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +12,8 @@ import org.junit.Test
 
 class ToolRegistryTest {
 
+    private val context = ToolContext(sessionId = "session-1", turnId = "1", callId = "1")
+
     @Test
     fun testRegisterAndExecuteTool() {
         val registry = ToolRegistry()
@@ -19,7 +22,7 @@ class ToolRegistryTest {
             description = "Gets weather for location",
             parameters = mapOf("location" to "City name"),
         )
-        registry.register(def) { args ->
+        registry.register(def) { _, args ->
             "Weather in ${args["location"]} is sunny"
         }
 
@@ -28,7 +31,7 @@ class ToolRegistryTest {
         assertEquals("get_weather", parsed?.name)
         assertEquals("NYC", parsed?.arguments?.get("location"))
 
-        val result = registry.execute(ToolCall("get_weather", mapOf("location" to "NYC")))
+        val result = registry.execute(ToolCall("get_weather", mapOf("location" to "NYC")), context)
         assertFalse(result.isError)
         assertEquals("Weather in NYC is sunny", result.output)
     }
@@ -36,7 +39,7 @@ class ToolRegistryTest {
     @Test
     fun testExecuteUnknownTool() {
         val registry = ToolRegistry()
-        val result = registry.execute(ToolCall("unknown_action", emptyMap()))
+        val result = registry.execute(ToolCall("unknown_action", emptyMap()), context)
         assertTrue(result.isError)
         assertEquals("No such tool: unknown_action", result.output)
     }

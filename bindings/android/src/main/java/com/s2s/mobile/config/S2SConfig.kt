@@ -11,7 +11,7 @@ data class S2SConfig(
     val audio: AudioConfig = AudioConfig(),
     val vad: VadConfig = VadConfig(),
     val stt: SttConfig = SttConfig(),
-    val llm: LlmConfig = LlmConfig(),
+    val generation: GenerationConfig = GenerationConfig(),
     val tts: TtsConfig = TtsConfig(),
     /**
      * Runs a silent warmup pass over VAD, STT and the LLM during [initialize],

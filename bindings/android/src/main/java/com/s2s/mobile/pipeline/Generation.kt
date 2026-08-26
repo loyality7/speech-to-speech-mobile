@@ -4,19 +4,10 @@ package com.s2s.mobile.pipeline
 data class ChatMessage(val role: String, val content: String)
 
 /**
- * On-device text generation runtimes the bundled [LanguageModel] implementations
- * support. Each expects a different model file format, so switching backend
- * means switching model file, not just a flag.
- */
-enum class LlmBackend {
-    /** llama.cpp via Llamatik. GGUF Q4/Q5/Q8 checkpoints. */
-    LLAMA_CPP,
-}
-
-/**
- * Per-turn sampling overrides, applied on top of [com.s2s.mobile.config.LlmConfig]'s
- * session-wide defaults for a single [LanguageModel.generate] call — e.g. "be more
- * deterministic for this one factual query." Null fields fall back to the config.
+ * Per-turn sampling overrides, applied on top of the [LanguageModel] implementation's
+ * own session-wide defaults for a single [LanguageModel.generate] call — e.g. "be
+ * more deterministic for this one factual query." Null fields fall back to
+ * whatever the backend would otherwise use.
  */
 data class GenerationOverrides(
     val temperature: Float? = null,

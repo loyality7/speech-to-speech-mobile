@@ -1,7 +1,6 @@
 package com.s2s.mobile.config
 
 import com.s2s.mobile.model.ModelSpec
-import com.s2s.mobile.pipeline.LlmBackend
 import com.s2s.mobile.pipeline.TtsBackend
 import java.io.File
 
@@ -55,13 +54,6 @@ object ModelConfigFactory {
         speed = spec.speed ?: 1.05f,
     )
 
-    fun llm(spec: ModelSpec) = LlmConfig(
-        backend = LlmBackend.LLAMA_CPP,
-        numThreads = spec.numThreads ?: 4,
-        batchSize = spec.batchSize ?: 512,
-        maxTokens = spec.maxTokens ?: 256,
-    )
-
     fun create(
         baseModelsDir: File,
         vadSpec: ModelSpec,
@@ -84,7 +76,6 @@ object ModelConfigFactory {
             audio = audioConfig,
             vad = vadConfig,
             stt = stt(sttSpec),
-            llm = llm(llmSpec),
             tts = tts(ttsSpec),
         )
     }

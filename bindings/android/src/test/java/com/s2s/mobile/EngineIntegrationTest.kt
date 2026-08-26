@@ -2,11 +2,15 @@ package com.s2s.mobile
 
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.ChatMessage
+import com.s2s.mobile.pipeline.ContextEngine
 import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
+import com.s2s.mobile.pipeline.NoopTools
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
 import com.s2s.mobile.pipeline.TokenSink
+import com.s2s.mobile.pipeline.ToolCall
+import com.s2s.mobile.pipeline.ToolContext
 import com.s2s.mobile.pipeline.Transcript
 import com.s2s.mobile.pipeline.Voice
 import com.s2s.mobile.pipeline.VoiceActivityDetector
@@ -98,6 +102,63 @@ class FakeLanguageModel(private val replyText: String = "Hello user! How can I h
     }
 }
 
+/**
+ * Minimal fake proving [ContextEngine] is a real substitution point — a future
+ * memory plugin implements this same interface and the engine never notices
+ * the difference. Keeps everything in one list; no compaction, no persistence.
+ */
+class FakeContextEngine(systemPrompt: String = "system") : ContextEngine {
+    private val turns = mutableListOf<ChatMessage>()
+    private var system = systemPrompt
+    var clearCalled = false
+        private set
+
+    override fun addUser(text: String) {
+        turns += ChatMessage("user", text)
+    }
+
+    override fun replaceLastUser(text: String) {
+        val index = turns.indexOfLast { it.role == "user" }
+        if (index >= 0) turns[index] = ChatMessage("user", text) else addUser(text)
+    }
+
+    override fun addAssistant(text: String) {
+        turns += ChatMessage("assistant", text)
+    }
+
+    override fun dropLastUserIfUnanswered() {
+        if (turns.lastOrNull()?.role == "user") turns.removeAt(turns.size - 1)
+    }
+
+    override fun addToolResult(name: String, output: String) {
+        turns += ChatMessage("user", "[tool $name returned] $output")
+    }
+
+    override fun messages(extraSystem: String?): List<ChatMessage> =
+        listOf(ChatMessage("system", listOfNotNull(system, extraSystem).joinToString("\n\n"))) + turns
+
+    override fun setSystemPrompt(prompt: String) {
+        system = prompt
+    }
+
+    override fun clear() {
+        clearCalled = true
+        turns.clear()
+    }
+
+    override fun toJson(): String = turns.joinToString("|") { "${it.role}:${it.content}" }
+
+    override fun fromJson(json: String) {
+        turns.clear()
+        if (json.isNotBlank()) {
+            json.split("|").forEach {
+                val (role, content) = it.split(":", limit = 2)
+                turns += ChatMessage(role, content)
+            }
+        }
+    }
+}
+
 class FakeSynthesizer : SpeechSynthesizer {
     override val sampleRate: Int = 16000
     override val voices: List<Voice> = listOf(Voice(0, "Amy"))
@@ -168,5 +229,38 @@ class EngineIntegrationTest {
             exceptionThrown = true
         }
         assertTrue(exceptionThrown)
+    }
+
+    /** Proves [ContextEngine] substitutes cleanly — the fake behaves exactly like [com.s2s.mobile.llm.ChatHistory] would from the engine's point of view. */
+    @Test
+    fun testFakeContextEngineSubstitutesForChatHistory() {
+        val context: ContextEngine = FakeContextEngine("You are a test assistant.")
+        context.addUser("hi")
+        context.addAssistant("hello")
+        context.addUser("what's the weather")
+
+        val messages = context.messages(extraSystem = "tools: none")
+        assertEquals("system", messages[0].role)
+        assertTrue(messages[0].content.contains("You are a test assistant."))
+        assertTrue(messages[0].content.contains("tools: none"))
+        assertEquals(4, messages.size)
+
+        context.dropLastUserIfUnanswered()
+        assertEquals(3, context.messages().size)
+
+        context.clear()
+        assertTrue((context as FakeContextEngine).clearCalled)
+        assertEquals(1, context.messages().size) // system message only
+    }
+
+    /** No concrete [com.s2s.mobile.pipeline.Tools] wiring exists in core — [NoopTools] is a genuine no-op, not a hidden default implementation. */
+    @Test
+    fun testNoopToolsIsInert() {
+        val toolContext = ToolContext(sessionId = "s", turnId = "1", callId = "1")
+        assertTrue(NoopTools.definitions.isEmpty())
+        assertEquals(null, NoopTools.promptSection())
+        assertEquals(null, NoopTools.parse("anything"))
+        val result = NoopTools.execute(ToolCall("whatever", emptyMap()), toolContext)
+        assertTrue(result.isError)
     }
 }

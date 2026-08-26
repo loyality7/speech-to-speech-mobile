@@ -1,6 +1,7 @@
 package com.s2s.mobile.tools
 
 import com.s2s.mobile.pipeline.ToolCall
+import com.s2s.mobile.pipeline.ToolContext
 import com.s2s.mobile.pipeline.ToolDefinition
 import com.s2s.mobile.pipeline.ToolFunction
 import com.s2s.mobile.pipeline.ToolResult
@@ -81,11 +82,11 @@ class ToolRegistry : Tools {
         return ToolCall(name, parseArguments(body))
     }
 
-    override fun execute(call: ToolCall): ToolResult {
+    override fun execute(call: ToolCall, context: ToolContext): ToolResult {
         val fn = functions[call.name]
             ?: return ToolResult(call.name, "No such tool: ${call.name}", isError = true)
         return try {
-            ToolResult(call.name, fn(call.arguments))
+            ToolResult(call.name, fn(context, call.arguments))
         } catch (e: Throwable) {
             ToolResult(call.name, e.message ?: e.javaClass.simpleName, isError = true)
         }
