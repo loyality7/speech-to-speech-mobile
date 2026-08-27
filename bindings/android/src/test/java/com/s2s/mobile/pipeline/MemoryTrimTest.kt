@@ -1,6 +1,5 @@
-package com.s2s.mobile.llm
+package com.s2s.mobile.pipeline
 
-import com.s2s.mobile.pipeline.LanguageModel
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,9 +11,9 @@ class MemoryTrimTest {
         val model = object : LanguageModel {
             override fun initialize() = Result.success(Unit)
             override fun generate(
-                messages: List<com.s2s.mobile.pipeline.ChatMessage>,
-                sink: com.s2s.mobile.pipeline.TokenSink,
-                overrides: com.s2s.mobile.pipeline.GenerationOverrides?,
+                messages: List<ChatMessage>,
+                sink: TokenSink,
+                overrides: GenerationOverrides?,
             ) {}
             override fun cancel() {}
             override fun resetContext() {}

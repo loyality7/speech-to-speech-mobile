@@ -4,10 +4,10 @@ package com.s2s.mobile.pipeline
  * Where conversation memory lives and how it is shaped into a prompt.
  *
  * [S2SEngine][com.s2s.mobile.S2SEngine] asks this for the messages a turn should
- * see rather than owning storage itself — the default, [com.s2s.mobile.llm.ChatHistory],
- * keeps everything in a bounded in-memory deque with rolling summarisation, but
- * a plugin can swap in SQLite, a vector store, or a remote memory service behind
- * the same calls without the engine changing.
+ * see rather than owning storage itself — core has no implementation of its own
+ * (the constructor's `history` parameter is required, not defaulted). A plugin
+ * (e.g. `s2s-context`'s SQLite-backed implementation) can be swapped for another
+ * one (a vector store, a remote memory service) without the engine changing.
  *
  * Deliberately narrow: turn-taking (add/replace/drop) and prompt assembly
  * (messages), nothing about retrieval strategy, embeddings, or persistence

@@ -23,9 +23,9 @@ import android.widget.Spinner
 import android.widget.TextView
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
+import com.s2s.host.core.HostComposer
+import com.s2s.host.core.PluginConfig
 import com.s2s.mobile.config.ModelConfigFactory
-import com.s2s.mobile.llm.LlamaConfig
-import com.s2s.mobile.llm.LlamaLanguageModel
 import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.HuggingFaceDownloader
@@ -544,8 +544,53 @@ class MainActivity : Activity() {
             )
             // No withContext here: initialize() suspends onto Dispatchers.IO itself.
             val loaded = try {
-                val languageModel = LlamaLanguageModel(LlamaConfig(), config.models.llmModel)
-                val e = S2SEngine(this@MainActivity, config, languageModel = languageModel)
+                // Composition goes through s2s-host's PluginRegistry/HostComposer
+                // rather than constructing LlamaLanguageModel/SqliteContextEngine
+                // directly — see JarvisHost for what's registered and why. Tool
+                // calling isn't wired through S2SEngine either way: it does one
+                // generation and stops, and interpreting tool calls is an
+                // orchestration job for s2s-agent's AgentRuntime, not this demo.
+                val sessionId = java.util.UUID.randomUUID().toString()
+                val registry = JarvisHost.registry(this@MainActivity)
+                registry.setConfig(JarvisHost.LLAMA_CPP, PluginConfig(mapOf("modelPath" to config.models.llmModel)))
+                registry.setConfig(
+                    JarvisHost.SQLITE_CONTEXT,
+                    PluginConfig(
+                        mapOf(
+                            "sessionId" to sessionId,
+                            "systemPrompt" to "Talk freely, but don't be rude. You are a helpful assistant.",
+                        ),
+                    ),
+                )
+                val composed = HostComposer(registry).resolve().getOrThrow()
+
+                // AgentRuntime needs the S2SEngine instance it will call
+                // speakAssistantText() on, and S2SEngine's externalTurnHandler
+                // needs a reference to AgentRuntime.run() — resolved with a
+                // late-bound var rather than restructuring either
+                // constructor's parameter order.
+                lateinit var runtime: com.s2s.agent.agent.AgentRuntime
+                val e = S2SEngine(
+                    this@MainActivity,
+                    config,
+                    languageModel = composed.languageModel,
+                    history = composed.contextEngine,
+                    sessionId = sessionId,
+                    externalTurnHandler = { text ->
+                        // Runs on the engine's own recognizer/STT thread —
+                        // AgentRuntime.run() blocks until the task reaches a
+                        // terminal/paused state, same contract as
+                        // LanguageModel.generate() itself, so this must not
+                        // run on a UI-facing thread. beginTurn() already
+                        // dispatches here off the audio thread for the
+                        // externalTurnHandler path; running the agent loop
+                        // synchronously on the same worker keeps the
+                        // threading story identical to the non-agent path's
+                        // llmWorker.execute { generate(...) }.
+                        Thread { runtime.run(text) }.start()
+                    },
+                )
+                runtime = JarvisHost.agentRuntime(e, composed.languageModel, composed.contextEngine, composed.tools)
                 if (e.initialize().isFailure) null else e.also { it.start() }
             } catch (ex: Throwable) {
                 Log.e("MainActivity", "Engine init failed", ex)

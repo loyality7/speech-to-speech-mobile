@@ -6,12 +6,6 @@
     native <methods>;
 }
 
-# Keep Llamatik (llama.cpp) native bridge classes and methods
--keep class com.llamatik.** { *; }
--keepclassmembers class com.llamatik.** {
-    native <methods>;
-}
-
 # Preserve Kotlin Function1 interface callbacks used across JNI boundaries
 -keep class kotlin.jvm.functions.Function1 { *; }
 

@@ -16,6 +16,7 @@ import com.s2s.mobile.pipeline.Voice
 import com.s2s.mobile.pipeline.VoiceActivityDetector
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -231,9 +232,9 @@ class EngineIntegrationTest {
         assertTrue(exceptionThrown)
     }
 
-    /** Proves [ContextEngine] substitutes cleanly — the fake behaves exactly like [com.s2s.mobile.llm.ChatHistory] would from the engine's point of view. */
+    /** Proves [ContextEngine] substitutes cleanly — a fake behaves exactly like a real plugin implementation (e.g. `s2s-context`'s SQLite-backed one) would from the engine's point of view. */
     @Test
-    fun testFakeContextEngineSubstitutesForChatHistory() {
+    fun testFakeContextEngineSubstitutesForContextEngine() {
         val context: ContextEngine = FakeContextEngine("You are a test assistant.")
         context.addUser("hi")
         context.addAssistant("hello")
@@ -262,5 +263,16 @@ class EngineIntegrationTest {
         assertEquals(null, NoopTools.parse("anything"))
         val result = NoopTools.execute(ToolCall("whatever", emptyMap()), toolContext)
         assertTrue(result.isError)
+    }
+
+    /** Pure contract test: identity semantics of [ToolContext] itself, independent of any [Tools] dispatcher implementation. */
+    @Test
+    fun testToolContextIdentitySemantics() {
+        val first = ToolContext(sessionId = "s", turnId = "3", callId = "1")
+        val second = ToolContext(sessionId = "s", turnId = "3", callId = "2")
+
+        assertEquals(first.sessionId, second.sessionId)
+        assertEquals(first.turnId, second.turnId)
+        assertNotEquals(first.callId, second.callId)
     }
 }

@@ -8,7 +8,9 @@ package com.s2s.mobile.pipeline
  * Type/required/enum metadata for one tool parameter — richer than a bare
  * description, but still flat: no nested objects, since small on-device
  * models follow one flat JSON call shape far more reliably than the nested
- * OpenAI tool schema (see [ToolRegistry]'s class doc).
+ * OpenAI tool schema (see `ToolRegistry`'s class doc, in the `s2s-tools`
+ * plugin repo — this contract is deliberately shaped around that reality
+ * even though core has no dispatcher implementation of its own).
  */
 data class ToolParameter(
     val description: String,

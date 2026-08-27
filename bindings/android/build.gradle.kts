@@ -80,11 +80,8 @@ dependencies {
     // POM and made the library impossible to package as an AAR at all.
     api("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.5")
 
-    // llama.cpp runtime for on-device LLM generation.
-    api("com.llamatik:library:1.7.0")
-
-    // Remote OpenAI-compat LLM backend (SSE streaming chat-completions)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // LLM backends (llama.cpp, remote OpenAI-compat, ...) moved to s2s-llm —
+    // core depends only on the LanguageModel interface, not any implementation.
 
     testImplementation("junit:junit:4.13.2")
 
@@ -92,4 +89,13 @@ dependencies {
     // throws on every call, so registry parsing would be untestable on the JVM.
     // This is the upstream implementation Android's is derived from.
     testImplementation("org.json:json:20240303")
+
+    // S2SEngine.initialize()/start() always build a real android.media.AudioTrack
+    // -backed SpeakerOutput internally (not injectable) — constructing a real
+    // engine on the plain JVM stub throws. Robolectric provides a simulated
+    // Android runtime so single-shot generation/speaking behavior can be
+    // exercised end to end without an emulator. Same tool s2s-context already
+    // uses for its own SQLite tests.
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
 }

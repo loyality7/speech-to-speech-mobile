@@ -9,21 +9,15 @@ import com.s2s.mobile.audio.VoiceSessionService
 import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.internal.BargeInGate
 import com.s2s.mobile.internal.TurnGuard
-import com.s2s.mobile.llm.ChatHistory
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
 import com.s2s.mobile.pipeline.ChatMessage
 import com.s2s.mobile.pipeline.ContextEngine
 import com.s2s.mobile.pipeline.GenerationOverrides
 import com.s2s.mobile.pipeline.LanguageModel
-import com.s2s.mobile.pipeline.NoopTools
 import com.s2s.mobile.pipeline.SpeechRecognizer
 import com.s2s.mobile.pipeline.SpeechSynthesizer
 import com.s2s.mobile.pipeline.TokenSink
-import com.s2s.mobile.pipeline.ToolContext
-import com.s2s.mobile.pipeline.ToolDefinition
-import com.s2s.mobile.pipeline.ToolFunction
-import com.s2s.mobile.pipeline.Tools
 import com.s2s.mobile.pipeline.Transcript
 import com.s2s.mobile.pipeline.VoiceActivityDetector
 import com.s2s.mobile.stt.OfflineVadRecognizer
@@ -42,7 +36,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Builds the opt-in post-TTS audio restorer (#63) only when both the feature
@@ -104,6 +97,13 @@ class S2SEngine @JvmOverloads constructor(
     private val config: S2SConfig,
     /** The text-generation backend. No default — core has no concrete [LanguageModel] of its own; supply one from a plugin (e.g. `s2s-llm`). */
     private val languageModel: LanguageModel,
+    /**
+     * Conversation memory. No default — core has no concrete [ContextEngine]
+     * of its own; supply one from a plugin (e.g. `s2s-context`'s
+     * `SqliteContextEngine`), or your own implementation for the simplest
+     * cases.
+     */
+    private val history: ContextEngine,
     private val vad: VoiceActivityDetector = defaultVad(config),
     private val recognizer: SpeechRecognizer = defaultRecognizer(config),
     private val synthesizer: SpeechSynthesizer = SherpaSynthesizer(config.tts, config.models.ttsDir),
@@ -112,32 +112,33 @@ class S2SEngine @JvmOverloads constructor(
     private val chunker: SentenceChunker =
         SentenceChunker(config.tts.firstChunkMinChars, config.tts.maxChunkChars, config.tts.minChunkChars),
     /**
-     * Register device capabilities here before [initialize] to enable tool calling.
-     * Defaults to [NoopTools] — a real [Tools] implementation (e.g. `ToolRegistry`,
-     * or a plugin's own) must be supplied for tool calling to do anything.
-     */
-    val tools: Tools = NoopTools,
-    /**
-     * Identifies this conversation to every [ToolContext] a tool call receives.
-     * Pass the ID of a conversation being resumed; omit to start a fresh one.
+     * Identifies this conversation. Tool calls are no longer interpreted or
+     * dispatched by the engine — an external caller (e.g. an agent harness)
+     * that drives tool execution should key its own [com.s2s.mobile.pipeline.ToolContext]
+     * on this same id. Pass the ID of a conversation being resumed; omit to
+     * start a fresh one.
      */
     sessionId: String = UUID.randomUUID().toString(),
     /**
-     * Conversation memory. Defaults to [ChatHistory] — a bounded in-memory
-     * deque with rolling summarisation. Supply a different [ContextEngine]
-     * (e.g. from a future memory plugin) to change how the engine remembers
-     * a conversation without changing anything else here.
+     * When set, a recognized utterance is handed to this callback instead of
+     * being generated internally — [ContextEngine.addUser] is NOT called and
+     * [LanguageModel.generate] is NOT invoked by the engine itself. The
+     * caller (e.g. an agent harness) owns everything from that point:
+     * recording the turn, generating, deciding whether the result is a tool
+     * call or a final answer, and eventually calling [speakAssistantText] to
+     * resume speech output.
+     *
+     * A generic text handoff, not an [com.s2s.mobile.pipeline.LanguageModel]/
+     * [ContextEngine] reference — this is the only seam through which a host
+     * can redirect turn handling, and it carries no dependency on what the
+     * host does with the text. `speech-to-speech-mobile` has no import of,
+     * or awareness of, any agent/harness/plugin-host concept.
      */
-    private val history: ContextEngine = ChatHistory(
-        systemPrompt = config.generation.systemPrompt,
-        keepTurns = config.generation.historyTurns,
-        compact = config.generation.compactHistory,
-    ),
+    private val externalTurnHandler: ((String) -> Unit)? = null,
 ) {
 
-    private val sessionId: String = sessionId
-
-    private val callSequence = AtomicLong(0)
+    /** Identifies this conversation — see the constructor param doc. Stable for the life of this instance. */
+    val sessionId: String = sessionId
 
     private val turns = TurnGuard()
     private val bargeInGate = BargeInGate(config.vad.bargeInFrames, config.vad.bargeInGraceMs)
@@ -546,10 +547,6 @@ class S2SEngine @JvmOverloads constructor(
         beginTurn(text.trim(), overrides)
     }
 
-    /** Registers a device capability the assistant can invoke. */
-    fun registerTool(definition: ToolDefinition, function: ToolFunction) =
-        tools.register(definition, function)
-
     fun setSystemPrompt(prompt: String) = history.setSystemPrompt(prompt)
 
     /**
@@ -675,6 +672,13 @@ class S2SEngine @JvmOverloads constructor(
 
     private fun beginTurn(userText: String, overrides: GenerationOverrides? = null) {
         pendingUserText = userText
+        val handler = externalTurnHandler
+        if (handler != null) {
+            turns.begin()
+            setState(S2SState.THINKING)
+            handler(userText)
+            return
+        }
         history.addUser(userText)
         startGeneration(overrides)
     }
@@ -700,6 +704,50 @@ class S2SEngine @JvmOverloads constructor(
         startGeneration()
     }
 
+    /**
+     * Speaks already-final text through the existing chunker/TTS pipeline —
+     * the counterpart to [generate]'s "one generation, no automatic speech"
+     * contract. For an external caller (e.g. an agent harness) that decided
+     * a completed generation's text is the final, user-facing answer rather
+     * than a tool call.
+     *
+     * This does NOT mean "the user said this": it never touches
+     * [ContextEngine.addUser]. It also does not call [ContextEngine.addAssistant]
+     * — [generate]'s `onComplete` already recorded the model's own output
+     * (tool-call-shaped or not) when it first completed; calling this a
+     * second time would double it in history. If the caller wants to speak
+     * text that never went through [generate] at all (a canned response, a
+     * tool-derived summary with no matching model turn), it must record that
+     * itself via [conversationHistory] access or its own [ContextEngine]
+     * calls before or after — this method's only job is turning text into
+     * spoken audio, safely, through the turn machinery [speak] already needs.
+     *
+     * Claims a fresh turn the same way starting a new generation would, so a
+     * barge-in landing in the gap between a generation completing and this
+     * being called still invalidates it correctly — nothing is spoken for a
+     * turn the user has already cut off.
+     */
+    fun speakAssistantText(text: String) {
+        if (text.isBlank()) return
+        check(initialized) { "initialize() must succeed before speakAssistantText()" }
+        val turn = turns.begin()
+        speaker?.flush()
+        chunker.reset()
+        synthesisDone = false
+        sawFirstAudio = false
+        turnEndedAt = System.currentTimeMillis()
+        firstTokenMs = 0
+        setState(S2SState.THINKING)
+        // speak()/markSynthesisDone() each dispatch their own work onto
+        // ttsWorker (a single-thread executor), same as generate()'s
+        // onComplete does for the non-agent path — queuing here directly
+        // rather than wrapping in another ttsWorker.execute keeps the two
+        // paths' threading identical.
+        chunker.accept(text).forEach { speak(turn, it) }
+        chunker.flush()?.let { speak(turn, it) }
+        markSynthesisDone(turn)
+    }
+
     private fun startGeneration(overrides: GenerationOverrides? = null) {
         partialReply = ""
         val turn = turns.begin()
@@ -715,15 +763,23 @@ class S2SEngine @JvmOverloads constructor(
         llmWorker.execute { generate(turn, overrides = overrides) }
     }
 
-    private fun generate(turn: Int, depth: Int = 0, overrides: GenerationOverrides? = null) {
+    /**
+     * Exactly one [LanguageModel.generate] call, start to finish. The engine
+     * does not inspect the completed text to decide whether it is a tool
+     * call — it has no opinion on that. Whatever the model produced is
+     * recorded via [ContextEngine.addAssistant] and reported via
+     * [S2SEvent.AssistantDone] unconditionally; nothing is spoken from here.
+     * An external caller (e.g. an agent harness) decides what the text means
+     * and, if it is a final answer, hands it to [speakAssistantText].
+     */
+    private fun generate(turn: Int, overrides: GenerationOverrides? = null) {
         if (turns.isStale(turn)) return
 
-        val toolPrompt = if (config.generation.toolsEnabled) tools.promptSection() else null
         val reply = StringBuilder()
 
         try {
             languageModel.generate(
-                history.messages(extraSystem = toolPrompt),
+                history.messages(),
                 object : TokenSink {
                     override fun onToken(text: String) {
                         if (turns.isStale(turn)) return
@@ -731,28 +787,17 @@ class S2SEngine @JvmOverloads constructor(
                         reply.append(text)
                         partialReply = reply.toString()
                         emit(S2SEvent.AssistantDelta(text))
-                        // A tool call must not be spoken aloud, and it only becomes
-                        // recognisable once the object closes — so hold synthesis
-                        // until completion when tools are on.
-                        if (!config.generation.toolsEnabled) {
-                            chunker.accept(text).forEach { speak(turn, it) }
-                        }
                     }
 
                     override fun onComplete() {
                         if (turns.isStale(turn)) return
                         val full = reply.toString()
 
-                        if (config.generation.toolsEnabled) {
-                            val call = tools.parse(full)
-                            if (call != null) {
-                                runTool(turn, call.name, full, depth, overrides)
-                                return
-                            }
-                            // Not a tool call after all: speak it now.
-                            chunker.accept(full).forEach { speak(turn, it) }
-                        }
-                        chunker.flush()?.let { speak(turn, it) }
+                        // The model's output — tool-call-shaped or not — is
+                        // already in whatever KV cache the backend keeps, so
+                        // history must describe the same conversation or the
+                        // next turn's cache anchor points at text that appears
+                        // nowhere in the prompt.
                         if (full.isNotBlank()) {
                             history.addAssistant(full)
                             emit(S2SEvent.AssistantDone(full))
@@ -763,8 +808,14 @@ class S2SEngine @JvmOverloads constructor(
                         // stale value and commit the same reply to history a
                         // second time via commitOrDropPendingTurn().
                         partialReply = ""
-                        markSynthesisDone(turn)
-                        if (full.isBlank() && running && _state.value == S2SState.THINKING) {
+                        // No speech was queued from this path — nothing for
+                        // markSynthesisDone's "wait for the TTS worker" to wait
+                        // for, so return to LISTENING directly. A later
+                        // speakAssistantText() call moves the state forward
+                        // again on its own, same as a fresh turn would.
+                        synthesisDone = true
+                        if (running && _state.value == S2SState.THINKING) {
+                            resetRecognitionPending = true
                             setState(S2SState.LISTENING)
                         }
                     }
@@ -809,41 +860,6 @@ class S2SEngine @JvmOverloads constructor(
             history.dropLastUserIfUnanswered()
         }
         partialReply = ""
-    }
-
-    private fun runTool(turn: Int, name: String, raw: String, depth: Int = 0, overrides: GenerationOverrides? = null) {
-        if (depth >= MAX_TOOL_RECURSION_DEPTH) {
-            Log.w(TAG, "Tool recursion depth $depth reached max limit $MAX_TOOL_RECURSION_DEPTH for tool $name")
-            emit(S2SEvent.Error("Tool recursion depth exceeded maximum limit ($MAX_TOOL_RECURSION_DEPTH)"))
-            if (running) setState(S2SState.LISTENING)
-            return
-        }
-
-        val call = tools.parse(raw) ?: return
-        val toolContext = ToolContext(
-            sessionId = sessionId,
-            turnId = turn.toString(),
-            callId = callSequence.incrementAndGet().toString(),
-        )
-        val result = tools.execute(call, toolContext)
-        emit(S2SEvent.ToolExecuted(name, result.output, result.isError))
-        if (turns.isStale(turn)) return
-
-        // The tool call itself was generated, so it is already in the KV cache.
-        // Recording it keeps the history and the cache describing the same
-        // conversation — without it the cache anchor points at text that appears
-        // nowhere in the prompt, and every turn after a tool call pays a full
-        // prefill.
-        history.addAssistant(raw)
-        // Committed above; see the same reasoning where the normal reply path
-        // clears it, in generate()'s onComplete.
-        partialReply = ""
-
-        // Feed the result back so the model can say what it did, rather than the
-        // user hearing silence after a successful action.
-        history.addToolResult(name, result.output)
-        chunker.reset()
-        llmWorker.execute { generate(turn, depth + 1, overrides) }
     }
 
     private fun speak(turn: Int, sentence: String) {
