@@ -32,6 +32,17 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    packaging {
+        resources {
+            // s2s-agent/s2s-host depend on the PUBLISHED speech-to-speech-mobile
+            // artifact while this app also depends on it as a local project
+            // (project(":bindings:android")) — both bundle the same resource
+            // files. Harmless duplicate content, not a real conflict; the
+            // local module's copy wins.
+            pickFirsts += "models_registry.json"
+        }
+    }
 }
 
 kotlin {
@@ -64,11 +75,18 @@ dependencies {
     // s2s-host: PluginRegistry/HostComposer — the composition root that
     // replaces this app's own hardcoded LlamaLanguageModel(...)/
     // SqliteContextEngine(...) construction.
-    implementation("com.github.loyality7:s2s-host:0.1.0")
+    //
+    // Capitalized groupId is deliberate, not a typo: JitPack indexed this
+    // repo's first successful build under com.github.Loyality7 (a casing
+    // race during initial publish) and only resolves that exact coordinate
+    // for this artifact — every other s2s-* dependency here correctly uses
+    // lowercase. Confirmed via https://jitpack.io/api/builds/com.github.Loyality7/s2s-host/0.1.1
+    // returning status "ok" while the lowercase equivalent 404s.
+    implementation("com.github.Loyality7:s2s-host:0.1.1")
 
     // s2s-agent: AgentRuntime — owns the model/tool/context loop that
     // S2SEngine deliberately does not. The demo drives voice input through
     // this instead of S2SEngine's own single-shot generate() path (see
     // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.1.0")
+    implementation("com.github.loyality7:s2s-agent:0.1.1")
 }
