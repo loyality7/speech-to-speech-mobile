@@ -21,17 +21,3 @@ rootProject.name = "SpeechToSpeechMobile"
 
 include(":bindings:android")
 include(":examples:android-demo")
-
-// LOCAL-DEV-ONLY verification scaffolding — s2s-host/s2s-agent are not yet
-// published to JitPack. Remove this block once they are, and depend on the
-// real coordinates instead (see s2s-llm/s2s-context/s2s-tools for the pattern).
-includeBuild("../s2s-host") {
-    dependencySubstitution {
-        substitute(module("com.github.loyality7:s2s-host")).using(project(":core"))
-    }
-}
-includeBuild("../s2s-agent") {
-    dependencySubstitution {
-        substitute(module("com.github.loyality7:s2s-agent")).using(project(":core"))
-    }
-}
