@@ -57,6 +57,9 @@ class AgentChatTestActivity : Activity() {
     private var engine: S2SEngine? = null
     private var runtime: AgentRuntime? = null
 
+    /** Guards against a second initializeAgent() call racing the first — llama.cpp is process-global (one LlamaLanguageModel per process), so a genuine double-init crashes the second attempt rather than queuing behind the first. */
+    @Volatile private var initializing = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
@@ -124,6 +127,8 @@ class AgentChatTestActivity : Activity() {
     }
 
     private fun initializeAgent() {
+        if (initializing) return
+        initializing = true
         scope.launch {
             try {
                 val config = ModelConfigFactory.create(
@@ -155,12 +160,21 @@ class AgentChatTestActivity : Activity() {
                     history = composed.contextEngine,
                     sessionId = sessionId,
                 )
+                // Assigned before initialize() completes, not after — if the
+                // Activity is destroyed mid-init (e.g. rotation, or the user
+                // backing out before load finishes), onDestroy()'s
+                // engine?.release() must still be able to free llama.cpp's
+                // process-global claim. A blocking native init call keeps
+                // running even after scope.cancel(), so onDestroy() needs a
+                // real reference to release regardless of where init was
+                // interrupted — otherwise a second launch of this screen hits
+                // "Another LlamaLanguageModel is already initialised."
+                engine = e
                 if (e.initialize().isFailure) {
                     appendTrace("S2SEngine.initialize() FAILED")
                     statusText.text = "Model failed to load — check models are downloaded"
                     return@launch
                 }
-                engine = e
 
                 val rt = AgentRuntime(e, composed.languageModel, composed.contextEngine, composed.tools, InMemoryTaskStore())
                 rt.addListener { event -> scope.launch { renderEvent(event) } }

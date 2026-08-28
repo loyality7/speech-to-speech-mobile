@@ -172,7 +172,15 @@ class MainActivity : Activity() {
         openSttTestBtn = Button(this).apply { text = "🎙️ Test STT Model" }
         val openAgentTestBtn = Button(this).apply { text = "🧪 Test Agent Tools" }
         openAgentTestBtn.setOnClickListener {
-            startActivity(Intent(this, AgentChatTestActivity::class.java))
+            // llama.cpp is process-global — only one LlamaLanguageModel may be
+            // initialized at a time (LlamaLanguageModel's own documented
+            // constraint). AgentChatTestActivity loads its own model
+            // instance, so it can't run alongside this Activity's engine.
+            if (running) {
+                status.text = "Stop the engine first — the tool tester loads its own model and llama.cpp only allows one active at a time."
+            } else {
+                startActivity(Intent(this, AgentChatTestActivity::class.java))
+            }
         }
 
         val navParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
