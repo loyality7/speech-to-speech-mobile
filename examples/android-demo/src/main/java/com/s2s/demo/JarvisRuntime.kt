@@ -4,25 +4,22 @@ import android.content.Context
 import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.task.InMemoryTaskStore
-import com.s2s.context.local.SqliteContextEngine
+import com.s2s.demo.plugin.AndroidPluginDiscovery
+import com.s2s.demo.plugin.BoundServiceTools
+import com.s2s.demo.plugin.BundledPlugins
+import com.s2s.demo.plugin.SharedPreferencesPluginInstallStore
+import com.s2s.host.core.DiscoveredPlugin
 import com.s2s.host.core.HostComposer
 import com.s2s.host.core.PluginConfig
-import com.s2s.host.core.PluginDescriptor
+import com.s2s.host.core.PluginEntryPoint
+import com.s2s.host.core.PluginManager
 import com.s2s.host.core.PluginProvider
 import com.s2s.host.core.PluginRegistry
 import com.s2s.host.core.PluginType
 import com.s2s.host.core.SharedPreferencesPluginConfigStore
-import com.s2s.llm.local.LlamaConfig
-import com.s2s.llm.local.LlamaLanguageModel
-import com.s2s.llm.remote.RemoteLanguageModel
-import com.s2s.llm.remote.RemoteLlmConfig
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.pipeline.ContextEngine
-import com.s2s.mobile.pipeline.LanguageModel
-import com.s2s.mobile.pipeline.Tools
-import com.s2s.tools.core.CalculatorTool
-import com.s2s.tools.core.ToolRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -60,32 +57,15 @@ import java.util.concurrent.Executors
  * nothing to cancel it on shutdown.
  */
 class JarvisRuntime(private val appContext: Context) {
-    companion object {
-        const val LLAMA_CPP = "llama-cpp"
-        const val REMOTE_LLM = "remote"
-        const val SQLITE_CONTEXT = "sqlite-context"
-        const val CORE_TOOLS = "core-tools"
 
-        /**
-         * Real-device evidence: the prior default ("Talk freely, but don't be
-         * rude. You are a helpful assistant.") gave a small local model
-         * (Qwen2.5-0.5B) zero guidance on voice-appropriate brevity or tool
-         * usage, and it responded to a simple subtraction request by
-         * narrating a multi-step long-division-style explanation instead of
-         * calling the calculator tool. This does not fix a weak model's
-         * reasoning limits — a 0.5B model will still be a 0.5B model — but it
-         * removes the part of the poor behavior that was actually the
-         * prompt's fault: no instruction to be concise, and no instruction to
-         * prefer a registered tool over mental math.
-         */
-        const val DEFAULT_SYSTEM_PROMPT =
-            "You are Jarvis, a voice assistant. Keep answers short and " +
-                "conversational — one or two sentences unless the user asks " +
-                "for detail. When a registered tool can answer the request " +
-                "(for example, a calculation), call it instead of solving it " +
-                "yourself. Never explain your reasoning step by step unless " +
-                "asked to."
-    }
+    /**
+     * The plugin lifecycle facade a UI uses to install/enable/configure/
+     * select plugins. Assigned during [buildRegistry] — the registry and
+     * the manager are built together because the manager is what populates
+     * the registry.
+     */
+    lateinit var pluginManager: PluginManager
+        private set
 
     val registry: PluginRegistry = buildRegistry(appContext)
 
@@ -125,8 +105,12 @@ class JarvisRuntime(private val appContext: Context) {
     suspend fun start(config: S2SConfig, llmConfig: Map<String, String>, contextConfig: Map<String, String>): Result<Unit> {
         check(!isRunning) { "JarvisRuntime.start() called while already running — call stop() first" }
 
-        registry.setConfig(LLAMA_CPP, PluginConfig(llmConfig))
-        registry.setConfig(SQLITE_CONTEXT, PluginConfig(contextConfig))
+        // Configure whichever plugin is currently SELECTED for each type,
+        // not a hardcoded plugin id. Switching the selected LLM in the
+        // Plugins screen then has to keep working with no change here —
+        // which was the point of removing the hardcoding.
+        registry.getSelected(PluginType.LANGUAGE_MODEL)?.let { registry.setConfig(it, PluginConfig(llmConfig)) }
+        registry.getSelected(PluginType.CONTEXT_ENGINE)?.let { registry.setConfig(it, PluginConfig(contextConfig)) }
 
         val composed = HostComposer(registry).resolve().getOrElse {
             return Result.failure(it)
@@ -200,53 +184,73 @@ class JarvisRuntime(private val appContext: Context) {
         agentExecutor.shutdown()
     }
 
+    /**
+     * Builds the registry from two sources, in order:
+     *
+     *  1. [BundledPlugins] — compiled into this APK. The only place concrete
+     *     provider classes are named.
+     *  2. Externally-installed plugin APKs the user has installed, found via
+     *     [AndroidPluginDiscovery] and bound over IPC.
+     *
+     * Adding a new external plugin requires no change to this method, to
+     * `HostComposer`, to `AgentRuntime`, or to `S2SEngine` — that is the
+     * property the whole plugin platform exists to provide.
+     */
     private fun buildRegistry(context: Context): PluginRegistry {
-        val configStore = SharedPreferencesPluginConfigStore(context.applicationContext)
-        val registry = PluginRegistry(configStore)
-
-        registry.register(
-            PluginDescriptor(LLAMA_CPP, PluginType.LANGUAGE_MODEL, "Llama.cpp", version = "0.2.0"),
-            PluginProvider<LanguageModel> { config ->
-                val modelPath = config["modelPath"] ?: error("llama-cpp plugin requires a 'modelPath' config value")
-                LlamaLanguageModel(LlamaConfig(), modelPath)
-            },
+        val app = context.applicationContext
+        val registry = PluginRegistry(SharedPreferencesPluginConfigStore(app))
+        val manager = PluginManager(
+            registry = registry,
+            installStore = SharedPreferencesPluginInstallStore(app),
+            discovery = AndroidPluginDiscovery(app),
         )
+        pluginManager = manager
 
-        registry.register(
-            PluginDescriptor(REMOTE_LLM, PluginType.LANGUAGE_MODEL, "Remote (OpenAI-compatible)", version = "0.2.0"),
-            PluginProvider<LanguageModel> { config ->
-                val baseUrl = config["baseUrl"] ?: error("remote plugin requires a 'baseUrl' config value")
-                RemoteLanguageModel(RemoteLlmConfig(baseUrl = baseUrl, apiKey = config["apiKey"]))
-            },
-        )
+        BundledPlugins.registerAll(manager, app)
 
-        registry.register(
-            PluginDescriptor(SQLITE_CONTEXT, PluginType.CONTEXT_ENGINE, "SQLite Context", version = "0.1.0"),
-            PluginProvider<ContextEngine> { config ->
-                val sessionId = config["sessionId"] ?: UUID.randomUUID().toString()
-                val systemPrompt = config["systemPrompt"] ?: DEFAULT_SYSTEM_PROMPT
-                SqliteContextEngine(context.applicationContext, sessionId, systemPrompt)
-            },
-        )
+        // Re-register anything the user previously installed. Discovery
+        // alone never activates a plugin — only a plugin with a stored
+        // installation record (and a matching signing identity) comes back.
+        manager.refreshDiscovered { found -> providerFor(app, found, registry.getConfig(found.descriptor.pluginId).values) }
 
-        // Real ToolRegistry + CalculatorTool, not NoopTools — proves the
-        // TOOLS slot actually reaches a working dispatcher through the
-        // plugin architecture rather than resolving to an inert stub.
-        registry.register(
-            PluginDescriptor(CORE_TOOLS, PluginType.TOOLS, "Core Tools (Calculator)", version = "0.1.0"),
-            PluginProvider<Tools> {
-                ToolRegistry().also { CalculatorTool.registerOn(it) }
-            },
-        )
-
-        registry.setEnabled(LLAMA_CPP, true)
-        registry.setEnabled(REMOTE_LLM, true)
-        registry.setEnabled(SQLITE_CONTEXT, true)
-        registry.setEnabled(CORE_TOOLS, true)
-        if (registry.getSelected(PluginType.LANGUAGE_MODEL) == null) registry.select(LLAMA_CPP, PluginType.LANGUAGE_MODEL)
-        if (registry.getSelected(PluginType.CONTEXT_ENGINE) == null) registry.select(SQLITE_CONTEXT, PluginType.CONTEXT_ENGINE)
-        if (registry.getSelected(PluginType.TOOLS) == null) registry.select(CORE_TOOLS, PluginType.TOOLS)
+        if (registry.getSelected(PluginType.LANGUAGE_MODEL) == null) manager.select(BundledPlugins.LLAMA_CPP, PluginType.LANGUAGE_MODEL)
+        if (registry.getSelected(PluginType.CONTEXT_ENGINE) == null) manager.select(BundledPlugins.SQLITE_CONTEXT, PluginType.CONTEXT_ENGINE)
+        if (registry.getSelected(PluginType.TOOLS) == null) manager.select(BundledPlugins.CORE_TOOLS, PluginType.TOOLS)
 
         return registry
+    }
+
+    companion object Providers {
+        /**
+         * Turns a discovered external plugin into the capability contract
+         * the host composes.
+         *
+         * The host knows the plugin only by its declared [PluginType] and
+         * its [PluginEntryPoint] address — never by class name. A
+         * [PluginEntryPoint.Kind.BOUND_SERVICE] TOOLS plugin becomes a
+         * [BoundServiceTools]; anything else is currently unsupported and
+         * is rejected here rather than half-composed.
+         */
+        fun providerFor(context: Context, found: DiscoveredPlugin, config: Map<String, String>): PluginProvider<*> {
+            val entry = found.descriptor.entryPoint
+            require(entry.kind == PluginEntryPoint.Kind.BOUND_SERVICE) {
+                "External plugin ${found.descriptor.pluginId} has unsupported entry point ${entry.kind}"
+            }
+            val (packageName, serviceClass) = entry.address.split('/', limit = 2)
+                .also { require(it.size == 2) { "Malformed bound-service address: ${entry.address}" } }
+
+            return when (found.descriptor.type) {
+                PluginType.TOOLS -> PluginProvider { cfg ->
+                    BoundServiceTools(context, packageName, serviceClass, cfg.values.ifEmpty { config })
+                }
+                // No IPC contract exists yet for a remote LLM/context/
+                // normalizer — declaring one is a separate, deliberate
+                // decision (each needs its own AIDL surface and streaming
+                // story), not something to fake here.
+                else -> throw IllegalArgumentException(
+                    "External plugins of type ${found.descriptor.type} are not supported yet — only TOOLS have an IPC contract",
+                )
+            }
+        }
     }
 }

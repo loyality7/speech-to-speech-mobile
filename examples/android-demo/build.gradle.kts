@@ -33,6 +33,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        // The plugin IPC contract is AIDL — the same interface file is
+        // compiled into both this app and every plugin APK.
+        aidl = true
+    }
+
     packaging {
         resources {
             // s2s-agent/s2s-host depend on the PUBLISHED speech-to-speech-mobile
@@ -82,7 +88,7 @@ dependencies {
     // to a one-off JitPack indexing race on first publish; 0.1.2 resolved
     // cleanly under the normal lowercase coordinate, confirming that was a
     // transient quirk, not a persistent property of this repo.
-    implementation("com.github.loyality7:s2s-host:0.1.2")
+    implementation("com.github.loyality7:s2s-host:0.2.0")
 
     // s2s-agent: AgentRuntime — owns the model/tool/context loop that
     // S2SEngine deliberately does not. The demo drives voice input through

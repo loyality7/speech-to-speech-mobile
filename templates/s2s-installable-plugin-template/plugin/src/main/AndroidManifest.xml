@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Everything the host needs to DISCOVER this plugin is declared here.
+  PackageManager can read all of it without starting this app or loading a
+  single one of its classes — that is what makes discovery safe.
+
+  Replace every com.example.s2splugin value with your own. Keep
+  com.s2s.plugin.* keys and the intent action exactly as they are: those are
+  the contract.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Declare permissions YOUR plugin needs for its own work here, as any
+      app would. These are granted to your process, not to the host app.
+
+      Separately, list in com.s2s.plugin.requiredPermissions below anything
+      the HOST must hold for your plugin to be usable — the host shows those
+      at install time and refuses to compose you until they are granted.
+    -->
+
+    <application
+        android:allowBackup="true"
+        android:label="Example S2S Plugin"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <service
+            android:name=".ExampleToolPluginService"
+            android:exported="true">
+
+            <!-- How the host finds this service. Do not change. -->
+            <intent-filter>
+                <action android:name="com.s2s.plugin.action.TOOL_PLUGIN" />
+            </intent-filter>
+
+            <!-- Stable and permanent: the host keys installation, config and selection on it. -->
+            <meta-data android:name="com.s2s.plugin.id" android:value="com.example.s2splugin.example" />
+
+            <!-- Shown to the user. Never a class name. -->
+            <meta-data android:name="com.s2s.plugin.displayName" android:value="Example Tools" />
+            <meta-data android:name="com.s2s.plugin.description" android:value="Reverses text and counts words. Replace with your own tools." />
+
+            <meta-data android:name="com.s2s.plugin.version" android:value="1.0.0" />
+
+            <!-- TOOLS is the only type with an IPC contract today. -->
+            <meta-data android:name="com.s2s.plugin.type" android:value="TOOLS" />
+
+            <!-- Host API this plugin targets; the host refuses anything newer than itself. -->
+            <meta-data android:name="com.s2s.plugin.minHostApiVersion" android:value="1" />
+
+            <!--
+              Comma-separated Android permissions the HOST must have granted.
+              Empty here: this example only does string manipulation.
+              e.g. "android.permission.READ_CONTACTS,android.permission.READ_CALENDAR"
+            -->
+            <meta-data android:name="com.s2s.plugin.requiredPermissions" android:value="" />
+
+            <!--
+              Settings the host should collect for you, as
+              key|Label|TYPE|required|help  (';'-separated for several).
+              Values reach execute() prefixed "__config_".
+              Types: TEXT, SECRET, FILE_PATH, NUMBER, BOOLEAN, CHOICE.
+              Omit this entry entirely if your plugin needs no configuration.
+            -->
+            <meta-data
+                android:name="com.s2s.plugin.configSchema"
+                android:value="apiKey|API key|SECRET|false|Only needed if you add a network tool" />
+        </service>
+    </application>
+
+</manifest>

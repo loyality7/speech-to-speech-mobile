@@ -73,7 +73,7 @@ class MainActivity : Activity() {
     private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
 
-    private val jarvis by lazy { JarvisRuntime(applicationContext) }
+    private val jarvis by lazy { com.s2s.demo.plugin.JarvisRuntimeHolder.get(applicationContext) }
     private var engine: S2SEngine? = null
     private var running = false
     private var partialShown = false
@@ -183,6 +183,11 @@ class MainActivity : Activity() {
             }
         }
 
+        val openPluginsBtn = Button(this).apply { text = "🧩 Plugins" }
+        openPluginsBtn.setOnClickListener {
+            startActivity(Intent(this, PluginsActivity::class.java))
+        }
+
         val navParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
             marginStart = 2
             marginEnd = 2
@@ -190,6 +195,7 @@ class MainActivity : Activity() {
         navRow.addView(openTtsTestBtn, navParams)
         navRow.addView(openSttTestBtn, navParams)
         navRow.addView(openAgentTestBtn, navParams)
+        navRow.addView(openPluginsBtn, navParams)
         root.addView(navRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         root.addView(label("Hugging Face Token (for gated repos, e.g. Gemma):", padTop = 4))

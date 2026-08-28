@@ -16,6 +16,7 @@ import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.task.InMemoryTaskStore
 import com.s2s.host.core.HostComposer
+import com.s2s.demo.plugin.BundledPlugins
 import com.s2s.host.core.PluginConfig
 import com.s2s.host.core.PluginType
 import com.s2s.mobile.S2SEngine
@@ -138,14 +139,14 @@ class AgentChatTestActivity : Activity() {
                     ModelRegistry.DEFAULT_TTS,
                     ModelRegistry.DEFAULT_LLM,
                 )
-                val registry = JarvisRuntime(applicationContext).registry
-                registry.setConfig(JarvisRuntime.LLAMA_CPP, PluginConfig(mapOf("modelPath" to config.models.llmModel)))
+                val registry = com.s2s.demo.plugin.JarvisRuntimeHolder.get(applicationContext).registry
+                registry.setConfig(BundledPlugins.LLAMA_CPP, PluginConfig(mapOf("modelPath" to config.models.llmModel)))
                 val sessionId = UUID.randomUUID().toString()
                 registry.setConfig(
-                    JarvisRuntime.SQLITE_CONTEXT,
-                    PluginConfig(mapOf("sessionId" to sessionId, "systemPrompt" to JarvisRuntime.DEFAULT_SYSTEM_PROMPT)),
+                    BundledPlugins.SQLITE_CONTEXT,
+                    PluginConfig(mapOf("sessionId" to sessionId, "systemPrompt" to BundledPlugins.DEFAULT_SYSTEM_PROMPT)),
                 )
-                registry.select(JarvisRuntime.CORE_TOOLS, PluginType.TOOLS)
+                registry.select(BundledPlugins.CORE_TOOLS, PluginType.TOOLS)
 
                 val composed = HostComposer(registry).resolve().getOrElse {
                     appendTrace("COMPOSITION FAILED: $it")

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A Jarvis plugin package.
+
+  Everything Jarvis needs to DISCOVER this plugin is declared here as
+  manifest metadata, readable by PackageManager without starting the app or
+  loading a single class of its code. That is the security property that
+  makes discovery safe: metadata inspection never executes the plugin.
+
+  Jarvis finds this package by querying for services with the
+  com.s2s.plugin.action.TOOL_PLUGIN intent action.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:label="Jarvis Echo Plugin"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <service
+            android:name=".EchoToolPluginService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.s2s.plugin.action.TOOL_PLUGIN" />
+            </intent-filter>
+
+            <!-- Stable ID Jarvis keys installation/config/selection on. -->
+            <meta-data android:name="com.s2s.plugin.id" android:value="com.s2s.testplugin.echo" />
+            <meta-data android:name="com.s2s.plugin.displayName" android:value="Echo Test Tools" />
+            <meta-data android:name="com.s2s.plugin.description" android:value="A trivial plugin that echoes text back and greets by name. Proves plugin installation works." />
+            <meta-data android:name="com.s2s.plugin.version" android:value="1.0.0" />
+            <meta-data android:name="com.s2s.plugin.type" android:value="TOOLS" />
+            <!-- Host API this plugin was built against; Jarvis refuses anything newer than itself. -->
+            <meta-data android:name="com.s2s.plugin.minHostApiVersion" android:value="1" />
+            <!-- Android permissions this plugin needs the HOST to have granted. None: it only does string work. -->
+            <meta-data android:name="com.s2s.plugin.requiredPermissions" android:value="" />
+            <!--
+              Config schema, so Jarvis can render a settings form without
+              knowing what any of these mean.
+              Format: key|Label|TYPE|required|help  (one field per ';')
+            -->
+            <meta-data
+                android:name="com.s2s.plugin.configSchema"
+                android:value="greeting|Greeting word|TEXT|false|Used by the greet tool. Defaults to Hello." />
+        </service>
+    </application>
+
+</manifest>

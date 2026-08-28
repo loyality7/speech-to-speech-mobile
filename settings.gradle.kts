@@ -21,3 +21,4 @@ rootProject.name = "SpeechToSpeechMobile"
 
 include(":bindings:android")
 include(":examples:android-demo")
+include(":examples:test-plugin")
