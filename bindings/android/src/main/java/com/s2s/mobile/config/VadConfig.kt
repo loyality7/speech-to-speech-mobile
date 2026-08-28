@@ -60,8 +60,14 @@ data class VadConfig(
      *
      * The echo canceller needs a moment to converge on a new output signal; until
      * it has, the assistant's first syllable reliably looks like user speech.
+     *
+     * Raised from 400 after a real-device run: a self-interruption fired
+     * ~403ms into playback with no actual user speech — 400ms wasn't enough
+     * convergence time for this device's AEC. 700ms is a real, if imperfect,
+     * tradeoff: a genuine user interruption in the reply's first 700ms won't
+     * register as barge-in on this hardware.
      */
-    val bargeInGraceMs: Long = 400,
+    val bargeInGraceMs: Long = 700,
     /** Allow the user to interrupt the assistant mid-sentence. */
     val bargeInEnabled: Boolean = true,
     val numThreads: Int = 1,
