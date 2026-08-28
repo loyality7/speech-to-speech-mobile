@@ -898,8 +898,15 @@ class S2SEngine @JvmOverloads constructor(
                     )
                     Log.i(
                         TAG,
-                        "turn latency: first token ${metrics.timeToFirstTokenMs}ms, " +
-                            "first audio ${metrics.timeToFirstAudioMs}ms",
+                        // firstTokenMs is only observed by generate()'s own
+                        // TokenSink. On the agent path an external handler runs
+                        // the model and hands us finished text via
+                        // speakAssistantText(), so that sink never fires and the
+                        // value stays 0 — reporting "0ms" there reads as an
+                        // impossibly fast turn instead of "not measured here".
+                        "turn latency: first token " +
+                            (if (metrics.timeToFirstTokenMs > 0) "${metrics.timeToFirstTokenMs}ms" else "n/a (external)") +
+                            ", first audio ${metrics.timeToFirstAudioMs}ms",
                     )
                     emit(S2SEvent.Metrics(metrics))
                     setState(S2SState.SPEAKING)
