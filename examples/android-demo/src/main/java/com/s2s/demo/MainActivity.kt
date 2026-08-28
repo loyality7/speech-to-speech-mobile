@@ -23,8 +23,6 @@ import android.widget.Spinner
 import android.widget.TextView
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
-import com.s2s.host.core.HostComposer
-import com.s2s.host.core.PluginConfig
 import com.s2s.mobile.config.ModelConfigFactory
 import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
@@ -75,6 +73,7 @@ class MainActivity : Activity() {
     private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
 
+    private val jarvis by lazy { JarvisRuntime(applicationContext) }
     private var engine: S2SEngine? = null
     private var running = false
     private var partialShown = false
@@ -358,9 +357,9 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Frees the current engine's models. A stopped-but-unreleased engine still owns them. */
+    /** Frees the current engine's models and the agent's dispatch thread — a stopped-but-unreleased runtime still owns both. */
     private fun releaseEngine() {
-        engine?.release()
+        jarvis.stop()
         engine = null
         running = false
     }
@@ -542,60 +541,27 @@ class MainActivity : Activity() {
                 selectedTts,
                 selectedLlm,
             )
-            // No withContext here: initialize() suspends onto Dispatchers.IO itself.
-            val loaded = try {
-                // Composition goes through s2s-host's PluginRegistry/HostComposer
-                // rather than constructing LlamaLanguageModel/SqliteContextEngine
-                // directly — see JarvisHost for what's registered and why. Tool
-                // calling isn't wired through S2SEngine either way: it does one
-                // generation and stops, and interpreting tool calls is an
-                // orchestration job for s2s-agent's AgentRuntime, not this demo.
-                val sessionId = java.util.UUID.randomUUID().toString()
-                val registry = JarvisHost.registry(this@MainActivity)
-                registry.setConfig(JarvisHost.LLAMA_CPP, PluginConfig(mapOf("modelPath" to config.models.llmModel)))
-                registry.setConfig(
-                    JarvisHost.SQLITE_CONTEXT,
-                    PluginConfig(
-                        mapOf(
-                            "sessionId" to sessionId,
-                            "systemPrompt" to "Talk freely, but don't be rude. You are a helpful assistant.",
-                        ),
-                    ),
-                )
-                val composed = HostComposer(registry).resolve().getOrThrow()
-
-                // AgentRuntime needs the S2SEngine instance it will call
-                // speakAssistantText() on, and S2SEngine's externalTurnHandler
-                // needs a reference to AgentRuntime.run() — resolved with a
-                // late-bound var rather than restructuring either
-                // constructor's parameter order.
-                lateinit var runtime: com.s2s.agent.agent.AgentRuntime
-                val e = S2SEngine(
-                    this@MainActivity,
+            // No withContext here: JarvisRuntime.start() suspends onto
+            // S2SEngine.initialize()'s own Dispatchers.IO internally.
+            // Composition goes through s2s-host's PluginRegistry/HostComposer
+            // rather than constructing LlamaLanguageModel/SqliteContextEngine
+            // directly — see JarvisRuntime for what's registered, why, and
+            // how the speech<->agent thread boundary is owned.
+            val sessionId = java.util.UUID.randomUUID().toString()
+            val started = try {
+                jarvis.start(
                     config,
-                    languageModel = composed.languageModel,
-                    history = composed.contextEngine,
-                    sessionId = sessionId,
-                    externalTurnHandler = { text ->
-                        // Runs on the engine's own recognizer/STT thread —
-                        // AgentRuntime.run() blocks until the task reaches a
-                        // terminal/paused state, same contract as
-                        // LanguageModel.generate() itself, so this must not
-                        // run on a UI-facing thread. beginTurn() already
-                        // dispatches here off the audio thread for the
-                        // externalTurnHandler path; running the agent loop
-                        // synchronously on the same worker keeps the
-                        // threading story identical to the non-agent path's
-                        // llmWorker.execute { generate(...) }.
-                        Thread { runtime.run(text) }.start()
-                    },
-                )
-                runtime = JarvisHost.agentRuntime(e, composed.languageModel, composed.contextEngine, composed.tools)
-                if (e.initialize().isFailure) null else e.also { it.start() }
+                    llmConfig = mapOf("modelPath" to config.models.llmModel),
+                    contextConfig = mapOf(
+                        "sessionId" to sessionId,
+                        "systemPrompt" to "Talk freely, but don't be rude. You are a helpful assistant.",
+                    ),
+                ).isSuccess
             } catch (ex: Throwable) {
                 Log.e("MainActivity", "Engine init failed", ex)
-                null
+                false
             }
+            val loaded = if (started) jarvis.engine else null
 
             toggle.isEnabled = true
             if (loaded != null) {
@@ -689,7 +655,9 @@ class MainActivity : Activity() {
         super.onDestroy()
         downloads.close()
         scope.cancel()
-        releaseEngine()
+        jarvis.shutdown()
+        engine = null
+        running = false
     }
 
     private companion object {
