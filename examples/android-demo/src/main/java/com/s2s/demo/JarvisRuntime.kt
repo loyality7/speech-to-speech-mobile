@@ -1,11 +1,13 @@
 package com.s2s.demo
 
 import android.content.Context
+import android.util.Log
 import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.task.InMemoryTaskStore
 import com.s2s.demo.plugin.AndroidPluginDiscovery
 import com.s2s.demo.plugin.BoundServiceTools
+import com.s2s.demo.plugin.BoundServiceTextNormalizer
 import com.s2s.demo.plugin.BundledPlugins
 import com.s2s.demo.plugin.SharedPreferencesPluginInstallStore
 import com.s2s.host.core.DiscoveredPlugin
@@ -20,6 +22,9 @@ import com.s2s.host.core.SharedPreferencesPluginConfigStore
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.config.S2SConfig
 import com.s2s.mobile.pipeline.ContextEngine
+import com.s2s.mobile.pipeline.NormalizationHeuristic
+import com.s2s.mobile.pipeline.TextNormalizationPolicy
+import com.s2s.mobile.pipeline.TextNormalizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -59,6 +64,55 @@ import java.util.concurrent.Executors
 class JarvisRuntime(private val appContext: Context) {
 
     /**
+     * Cleans a raw transcript before the agent sees it, if a normalizer is
+     * selected and the policy says this utterance is worth it.
+     *
+     * Runs on the agent dispatcher, between STT and `AgentRuntime.run()` —
+     * the correct boundary. `S2SEngine` knows nothing about normalization
+     * and `AgentRuntime` receives only finished text, so neither had to
+     * change to support this.
+     *
+     * Always returns usable text. Every failure inside the normalizer
+     * already falls back to the raw transcript; this adds the outer
+     * guarantee that a thrown exception cannot lose the turn either.
+     */
+    private fun normalizeTranscript(raw: String): String {
+        val normalizer = textNormalizer ?: return raw
+        if (normalizationPolicy == TextNormalizationPolicy.DISABLED) return raw
+        if (normalizationPolicy == TextNormalizationPolicy.AUTO &&
+            !NormalizationHeuristic.benefitsFromNormalization(raw)
+        ) {
+            Log.i(TAG, "normalization skipped (AUTO: transcript looks clean)")
+            return raw
+        }
+
+        val started = System.currentTimeMillis()
+        val result = runCatching { normalizer.normalize(raw) }.getOrElse {
+            Log.w(TAG, "normalizer threw — using raw transcript", it)
+            raw
+        }
+        val elapsed = System.currentTimeMillis() - started
+        // Timing only, never the transcript: this is the number that decides
+        // whether normalization is worth its place on the voice path.
+        Log.i(TAG, "normalization took ${elapsed}ms (changed=${result != raw})")
+        return result
+    }
+
+    /** The selected normalizer plugin, or null if none is installed/enabled/selected. Never throws — normalization is optional. */
+    private fun resolveNormalizer(): TextNormalizer? {
+        val selected = registry.getSelected(PluginType.SPEECH_TEXT_NORMALIZER) ?: return null
+        if (!registry.canCompose(selected)) {
+            Log.i(TAG, "normalizer plugin $selected is selected but not composable — skipping")
+            return null
+        }
+        val descriptor = registry.find(selected) ?: return null
+        return runCatching {
+            val (packageName, serviceClass) = descriptor.entryPoint.address.split('/', limit = 2)
+            BoundServiceTextNormalizer(appContext, packageName, serviceClass)
+        }.onFailure { Log.w(TAG, "could not build normalizer for $selected", it) }.getOrNull()
+    }
+
+    /**
      * The plugin lifecycle facade a UI uses to install/enable/configure/
      * select plugins. Assigned during [buildRegistry] — the registry and
      * the manager are built together because the manager is what populates
@@ -74,6 +128,21 @@ class JarvisRuntime(private val appContext: Context) {
     var agentRuntime: AgentRuntime? = null
         private set
     private var contextEngine: ContextEngine? = null
+
+    /**
+     * The selected transcript normalizer, if one is installed, enabled and
+     * selected. Null is the normal case — normalization is optional, and
+     * everything works without it.
+     */
+    private var textNormalizer: TextNormalizer? = null
+
+    /**
+     * When normalization runs. AUTO by default: on a phone, paying a model
+     * call for "what time is it" is worse than leaving a rough transcript
+     * alone, so only utterances that actually look like they need cleaning
+     * get one. See [NormalizationHeuristic].
+     */
+    var normalizationPolicy: TextNormalizationPolicy = TextNormalizationPolicy.AUTO
 
     /** Derived, not tracked separately — [engine] is non-null for exactly the lifetime a call to [start] has succeeded and [stop] hasn't yet cleared it. */
     val isRunning: Boolean get() = engine != null
@@ -106,11 +175,23 @@ class JarvisRuntime(private val appContext: Context) {
         check(!isRunning) { "JarvisRuntime.start() called while already running — call stop() first" }
 
         // Configure whichever plugin is currently SELECTED for each type,
-        // not a hardcoded plugin id. Switching the selected LLM in the
-        // Plugins screen then has to keep working with no change here —
-        // which was the point of removing the hardcoding.
-        registry.getSelected(PluginType.LANGUAGE_MODEL)?.let { registry.setConfig(it, PluginConfig(llmConfig)) }
-        registry.getSelected(PluginType.CONTEXT_ENGINE)?.let { registry.setConfig(it, PluginConfig(contextConfig)) }
+        // not a hardcoded plugin id. Switching the selected LLM then keeps
+        // working with no change here — the point of removing the
+        // hardcoding.
+        //
+        // MERGED, not replaced: llmConfig carries the on-device model path
+        // this host derived from the model spinner, but a remote provider is
+        // configured with a URL and key the user typed into a settings form.
+        // Overwriting would wipe those the moment the engine started, so
+        // stored values win and the host only fills in what is missing.
+        registry.getSelected(PluginType.LANGUAGE_MODEL)?.let { pluginId ->
+            val stored = registry.getConfig(pluginId).values
+            registry.setConfig(pluginId, PluginConfig(llmConfig + stored))
+        }
+        registry.getSelected(PluginType.CONTEXT_ENGINE)?.let { pluginId ->
+            val stored = registry.getConfig(pluginId).values
+            registry.setConfig(pluginId, PluginConfig(contextConfig + stored))
+        }
 
         val composed = HostComposer(registry).resolve().getOrElse {
             return Result.failure(it)
@@ -133,7 +214,7 @@ class JarvisRuntime(private val appContext: Context) {
                 // class doc) — and scoped to runtimeScope so stop()'s
                 // scope.cancel() actually reaches an in-flight turn instead
                 // of leaving an orphaned, uncancellable Thread running.
-                runtimeScope.launch { runtime.run(text) }
+                runtimeScope.launch { runtime.run(normalizeTranscript(text)) }
             },
         )
 
@@ -148,6 +229,19 @@ class JarvisRuntime(private val appContext: Context) {
         runtime.addListener { event -> _agentEvents.tryEmit(event) }
         agentRuntime = runtime
         contextEngine = composed.contextEngine
+
+        // Resolve the normalizer separately from HostComposer's three core
+        // capabilities: it is genuinely optional, and a missing or broken
+        // normalizer must never stop the assistant from starting. Warmed up
+        // here, off the voice path, so the first utterance doesn't pay the
+        // model's cold start.
+        textNormalizer = resolveNormalizer()
+        (textNormalizer as? BoundServiceTextNormalizer)?.let { normalizer ->
+            runtimeScope.launch {
+                val warmed = normalizer.warmUp()
+                Log.i(TAG, "text normalizer warm-up ${if (warmed) "succeeded" else "failed (raw transcripts will be used)"}")
+            }
+        }
         engine = e
         e.start()
         return Result.success(Unit)
@@ -176,6 +270,11 @@ class JarvisRuntime(private val appContext: Context) {
         agentRuntime = null
         contextEngine?.close()
         contextEngine = null
+        // Unbinds and tells the plugin to free its model — otherwise a
+        // 462 MiB normalizer stays resident in another process after this
+        // runtime has stopped needing it.
+        textNormalizer?.release()
+        textNormalizer = null
     }
 
     /** Fully shuts down this runtime instance, including the dedicated agent thread — call once, when the owning component is destroyed for good (e.g. `onDestroy`), never before a plain restart (use [stop] + [start] for that). */
@@ -221,6 +320,8 @@ class JarvisRuntime(private val appContext: Context) {
     }
 
     companion object Providers {
+        private const val TAG = "JarvisRuntime"
+
         /**
          * Turns a discovered external plugin into the capability contract
          * the host composes.
@@ -243,12 +344,16 @@ class JarvisRuntime(private val appContext: Context) {
                 PluginType.TOOLS -> PluginProvider { cfg ->
                     BoundServiceTools(context, packageName, serviceClass, cfg.values.ifEmpty { config })
                 }
-                // No IPC contract exists yet for a remote LLM/context/
-                // normalizer — declaring one is a separate, deliberate
-                // decision (each needs its own AIDL surface and streaming
-                // story), not something to fake here.
+                PluginType.SPEECH_TEXT_NORMALIZER -> PluginProvider {
+                    BoundServiceTextNormalizer(context, packageName, serviceClass)
+                }
+                // LANGUAGE_MODEL and CONTEXT_ENGINE have no IPC contract
+                // yet: both need streaming surfaces (token-by-token
+                // generation, cancellation) that a request/response AIDL
+                // interface does not express well. Declaring one is a
+                // deliberate design step, not something to fake here.
                 else -> throw IllegalArgumentException(
-                    "External plugins of type ${found.descriptor.type} are not supported yet — only TOOLS have an IPC contract",
+                    "External plugins of type ${found.descriptor.type} have no IPC contract yet",
                 )
             }
         }

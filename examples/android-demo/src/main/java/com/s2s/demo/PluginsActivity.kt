@@ -74,7 +74,7 @@ class PluginsActivity : Activity() {
         )
 
         val installedRecords = manager.installed().associateBy { it.pluginId }
-        val known = registry.list().sortedWith(compareBy({ it.type.name }, { it.displayName }))
+        val known = registry.list().sortedWith(compareBy({ it.type.id }, { it.displayName }))
 
         container.addView(sectionHeading("Installed"))
         if (known.isEmpty()) {
@@ -158,6 +158,14 @@ class PluginsActivity : Activity() {
             )
         }
 
+        // A plugin may ship its own screen — typically to download or manage
+        // whatever assets it owns (a model, credentials). The host offers a
+        // way in without knowing what the screen does: it just launches the
+        // plugin package's own launcher activity.
+        pluginLaunchIntent(descriptor)?.let { intent ->
+            actions.addView(actionButton("Open settings") { startActivity(intent) })
+        }
+
         if (isExternalInstall) {
             actions.addView(
                 actionButton("Uninstall") {
@@ -182,11 +190,26 @@ class PluginsActivity : Activity() {
         if (d.description.isNotBlank()) card.addView(body(d.description))
         card.addView(meta("${typeLabel(d.type)} · v${d.version}\n${found.sourceLabel}"))
 
+        // A plugin may declare a capability this build has no adapter for —
+        // a plugin written for a newer host. Saying so up front is better
+        // than letting Install fail: the user can see it is installed and
+        // recognised, just not usable yet.
+        if (!isSupportedType(d.type)) {
+            card.addView(
+                meta("Not supported by this version of the app — it provides \"${d.type}\", which this build cannot use yet."),
+            )
+            return card
+        }
+
         card.addView(
             actionButton("Install") { confirmInstall(found) },
         )
         return card
     }
+
+    /** Whether this build has an adapter that can actually talk to [type]. Discovery accepts any type; using one needs its contract. */
+    private fun isSupportedType(type: PluginType): Boolean =
+        type == PluginType.TOOLS || type == PluginType.SPEECH_TEXT_NORMALIZER
 
     /** Install is a consent step: capabilities and permissions are shown BEFORE anything is registered. */
     private fun confirmInstall(found: DiscoveredPlugin) {
@@ -294,11 +317,20 @@ class PluginsActivity : Activity() {
         return parts.joinToString(" · ")
     }
 
+    /**
+     * Human label for a capability type.
+     *
+     * Falls back to a tidied version of the declared id rather than
+     * requiring every possible type to be known here — a plugin for a
+     * newer host still gets a readable label ("Calendar access") instead of
+     * being unlistable.
+     */
     private fun typeLabel(type: PluginType) = when (type) {
         PluginType.LANGUAGE_MODEL -> "Language model"
         PluginType.CONTEXT_ENGINE -> "Memory"
         PluginType.TOOLS -> "Tools"
         PluginType.SPEECH_TEXT_NORMALIZER -> "Speech cleanup"
+        else -> type.id.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
     private fun sourceLabel(source: PluginSource) = when (source) {
@@ -312,6 +344,22 @@ class PluginsActivity : Activity() {
     /** Turns an Android permission string into something a person can read, without a hardcoded table per plugin. */
     private fun permissionLabel(permission: String) =
         permission.substringAfterLast('.').lowercase().replace('_', ' ')
+
+    /**
+     * The plugin package's own launcher activity, if it has one.
+     *
+     * Null for a bundled plugin (no separate package) or an external plugin
+     * with no UI. Resolved through PackageManager rather than declared in
+     * metadata, because an app's launcher intent is something Android
+     * already knows — asking the plugin to repeat it would just be another
+     * field to get wrong.
+     */
+    private fun pluginLaunchIntent(descriptor: PluginDescriptor): android.content.Intent? {
+        val address = descriptor.entryPoint.address.takeIf { it.isNotBlank() } ?: return null
+        val packageName = address.substringBefore('/').takeIf { it.isNotBlank() } ?: return null
+        if (packageName == this.packageName) return null
+        return runCatching { packageManager.getLaunchIntentForPackage(packageName) }.getOrNull()
+    }
 
     private fun grantedPermissions(descriptor: PluginDescriptor): Set<String> =
         descriptor.requiredPermissions

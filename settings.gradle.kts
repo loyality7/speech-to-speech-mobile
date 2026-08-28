@@ -22,3 +22,4 @@ rootProject.name = "SpeechToSpeechMobile"
 include(":bindings:android")
 include(":examples:android-demo")
 include(":examples:test-plugin")
+include(":examples:s1-normalizer-plugin")

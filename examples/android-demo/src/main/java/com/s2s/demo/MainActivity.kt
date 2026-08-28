@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import com.s2s.demo.plugin.BundledPlugins
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
 import com.s2s.mobile.config.ModelConfigFactory
@@ -249,6 +250,7 @@ class MainActivity : Activity() {
         hfBrowseButtons = browseButtons
 
         root.addView(selectionBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        root.addView(buildLlmProviderBox(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         status = TextView(this).apply {
             textSize = 14f
@@ -298,6 +300,102 @@ class MainActivity : Activity() {
     private val sttOptions = ModelRegistry.ALL_STT_OPTIONS.toMutableList()
     private val ttsOptions = ModelRegistry.ALL_TTS_OPTIONS.toMutableList()
     private val llmOptions = ModelRegistry.ALL_LLM_OPTIONS.toMutableList()
+
+    /**
+     * Chooses which LLM *provider* answers — on-device or a remote
+     * endpoint — as distinct from the "LLM Model" spinner above, which only
+     * picks which GGUF file the on-device provider loads.
+     *
+     * Worth surfacing here rather than leaving in the Plugins screen: the
+     * on-device model's speed depends heavily on the phone, so "this is too
+     * slow, use my server instead" is a decision made while testing voice,
+     * not while managing plugins.
+     *
+     * Switching providers changes nothing else. `AgentRuntime` receives a
+     * `LanguageModel` and has no idea which plugin produced it, so tools
+     * and conversation memory keep working exactly the same either way —
+     * that separation is the whole point of the plugin/composition layer.
+     */
+    private fun buildLlmProviderBox(): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 16, 0, 8)
+        }
+
+        box.addView(label("Answering with:"))
+
+        val providerSpinner = Spinner(this)
+        val providers = listOf(
+            BundledPlugins.LLAMA_CPP to "On-device (llama.cpp)",
+            BundledPlugins.REMOTE_LLM to "Remote server (OpenAI-compatible)",
+        )
+        providerSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            providers.map { it.second },
+        )
+
+        val remoteBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val urlInput = EditText(this).apply {
+            hint = "https://your-server/v1"
+            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["baseUrl"].orEmpty())
+        }
+        val keyInput = EditText(this).apply {
+            hint = "API key (optional)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["apiKey"].orEmpty())
+        }
+        val saveRemoteBtn = Button(this).apply { text = "Save server settings" }
+        saveRemoteBtn.setOnClickListener {
+            val url = urlInput.text.toString().trim()
+            if (url.isEmpty()) {
+                status.text = "Enter a server URL first."
+                return@setOnClickListener
+            }
+            jarvis.pluginManager.configure(
+                BundledPlugins.REMOTE_LLM,
+                com.s2s.host.core.PluginConfig(
+                    buildMap {
+                        put("baseUrl", url)
+                        keyInput.text.toString().trim().takeIf { it.isNotEmpty() }?.let { put("apiKey", it) }
+                    },
+                ),
+            )
+            status.text = "Server settings saved. Restart the engine to use them."
+        }
+        remoteBox.addView(label("Server URL:", padTop = 4))
+        remoteBox.addView(urlInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        remoteBox.addView(keyInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        remoteBox.addView(saveRemoteBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // Reflect what is actually selected rather than assuming a default —
+        // the selection is persisted, so it survives restarts and may
+        // already be remote.
+        val current = jarvis.registry.getSelected(com.s2s.host.core.PluginType.LANGUAGE_MODEL)
+        providers.indexOfFirst { it.first == current }.takeIf { it >= 0 }?.let { providerSpinner.setSelection(it) }
+        remoteBox.visibility = if (current == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
+
+        providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val (pluginId, label) = providers[position]
+                jarvis.pluginManager.select(pluginId, com.s2s.host.core.PluginType.LANGUAGE_MODEL)
+                remoteBox.visibility = if (pluginId == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
+                // Deliberately does not restart a running engine: swapping
+                // the model under an in-flight turn would abandon it
+                // mid-sentence. Applying on next start is the predictable
+                // behaviour.
+                if (running) status.text = "$label selected — restart the engine to apply."
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        box.addView(providerSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        box.addView(remoteBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        return box
+    }
 
     private fun setupSpinners() {
         bindSpinner(vadSpinner, vadOptions) { selectedVad = it }

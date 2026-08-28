@@ -21,6 +21,9 @@
             android:name=".EchoToolPluginService"
             android:exported="true">
             <intent-filter>
+                <!-- Generic plugin action; the capability is in com.s2s.plugin.type below. -->
+                <action android:name="com.s2s.plugin.action.PLUGIN" />
+                <!-- The earlier per-capability action, for hosts built before the generic one. -->
                 <action android:name="com.s2s.plugin.action.TOOL_PLUGIN" />
             </intent-filter>
 

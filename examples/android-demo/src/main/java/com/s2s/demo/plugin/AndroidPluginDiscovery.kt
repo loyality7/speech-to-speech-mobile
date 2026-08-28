@@ -31,10 +31,29 @@ import java.security.MessageDigest
  */
 class AndroidPluginDiscovery(private val context: Context) : PluginDiscovery {
 
+    /**
+     * Every plugin on the device, of any capability type.
+     *
+     * One generic action, and the capability comes from metadata. The
+     * alternative — an action per capability type — meant a new type
+     * required editing this file AND the host manifest's `<queries>`, which
+     * is exactly the hardcoding a plugin platform exists to avoid. Now a
+     * plugin declaring a type this build has never heard of is still found
+     * and listed; it simply has no adapter to use it with.
+     *
+     * The legacy per-type actions are still queried so plugins built
+     * against the earlier contract keep working — an installed plugin must
+     * not stop being discoverable because the host changed its convention.
+     */
     override fun discover(): List<DiscoveredPlugin> {
         val pm = context.packageManager
-        val intent = Intent(PLUGIN_ACTION)
+        return (listOf(PLUGIN_ACTION) + LEGACY_ACTIONS)
+            .flatMap { action -> queryServices(pm, action) }
+            .distinctBy { it.descriptor.pluginId }
+    }
 
+    private fun queryServices(pm: PackageManager, action: String): List<DiscoveredPlugin> {
+        val intent = Intent(action)
         val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(PackageManager.GET_META_DATA.toLong()))
         } else {
@@ -55,10 +74,13 @@ class AndroidPluginDiscovery(private val context: Context) : PluginDiscovery {
         val version = meta.getString(META_VERSION)?.takeIf { it.isNotBlank() } ?: return null
         val typeName = meta.getString(META_TYPE)?.takeIf { it.isNotBlank() } ?: return null
 
-        // An unrecognised type is not an error to crash on — it's a plugin
-        // built for a newer Jarvis. Skip it the same way an incompatible
-        // API version is skipped.
-        val type = runCatching { PluginType.valueOf(typeName) }.getOrNull() ?: return null
+        // Any declared type is accepted, including one this build has never
+        // heard of. Previously an unknown type was dropped here, which meant
+        // a plugin for a newer host was invisible rather than visible-and-
+        // unsupported — the user could not even see that it was installed.
+        // Whether the host can USE it is decided later, by whether an
+        // adapter exists.
+        val type = PluginType.of(typeName)
 
         val descriptor = PluginDescriptor(
             pluginId = pluginId,
@@ -128,7 +150,23 @@ class AndroidPluginDiscovery(private val context: Context) : PluginDiscovery {
 
     private companion object {
         const val TAG = "PluginDiscovery"
-        const val PLUGIN_ACTION = "com.s2s.plugin.action.TOOL_PLUGIN"
+
+        /**
+         * The one action every s2s plugin declares, whatever it provides.
+         *
+         * Capability type lives in metadata instead, so a new type needs no
+         * change here and no change to the host manifest. Android's package
+         * visibility requires the host to name actions at build time (there
+         * is no wildcard), so exactly one generic action is the furthest
+         * this can be de-hardcoded — and it is enough.
+         */
+        const val PLUGIN_ACTION = "com.s2s.plugin.action.PLUGIN"
+
+        /** Earlier per-capability actions, still queried so already-installed plugins keep working. */
+        val LEGACY_ACTIONS = listOf(
+            "com.s2s.plugin.action.TOOL_PLUGIN",
+            "com.s2s.plugin.action.TEXT_NORMALIZER_PLUGIN",
+        )
         const val META_ID = "com.s2s.plugin.id"
         const val META_NAME = "com.s2s.plugin.displayName"
         const val META_DESCRIPTION = "com.s2s.plugin.description"

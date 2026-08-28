@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "S1-mini" by "Superwhisper" as an installable text-normalizer plugin.
+
+  Everything the host needs to discover this plugin is manifest metadata,
+  readable by PackageManager without starting this app or loading any of
+  its code.
+
+  This app runs its own llama.cpp in its own process. That is required, not
+  stylistic: llama.cpp bindings here are process-global singletons, so the
+  host's primary language model and this normalizer cannot share a process.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Downloading the model from Hugging Face. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="S1-mini Normalizer"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <!-- Setup UI: download/remove the model and try it. The plugin owns its own model, so it owns this screen. -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:label="S1-mini Normalizer"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".S1MiniNormalizerService"
+            android:exported="true">
+            <intent-filter>
+                <!--
+                  The generic plugin action every s2s plugin declares. The
+                  capability this plugin provides is stated in the
+                  com.s2s.plugin.type metadata below, not in the action, so
+                  a host does not need a new action to discover a new
+                  capability type.
+                -->
+                <action android:name="com.s2s.plugin.action.PLUGIN" />
+                <!-- The earlier per-capability action, for hosts built before the generic one. -->
+                <action android:name="com.s2s.plugin.action.TEXT_NORMALIZER_PLUGIN" />
+            </intent-filter>
+
+            <meta-data android:name="com.s2s.plugin.id" android:value="com.s2s.plugin.s1.normalizer" />
+            <meta-data android:name="com.s2s.plugin.displayName" android:value="S1-mini by Superwhisper" />
+            <meta-data
+                android:name="com.s2s.plugin.description"
+                android:value="Cleans raw speech-to-text into written English: punctuation, numbers, filler words and self-corrections. Runs on-device in its own process. Not a chat model." />
+            <meta-data android:name="com.s2s.plugin.version" android:value="1.0.0" />
+            <meta-data android:name="com.s2s.plugin.type" android:value="SPEECH_TEXT_NORMALIZER" />
+            <meta-data android:name="com.s2s.plugin.minHostApiVersion" android:value="1" />
+
+            <!-- Needs nothing from the host: it reads no host data and touches no device capability. -->
+            <meta-data android:name="com.s2s.plugin.requiredPermissions" android:value="" />
+
+            <!--
+              The three documented S1-mini control-line settings, surfaced
+              as host-rendered options. The host stores the values and
+              passes them through; it never learns what they mean.
+            -->
+            <meta-data
+                android:name="com.s2s.plugin.configSchema"
+                android:value="styling|Writing style|CHOICE|false|casual, semi-casual, semi-formal or formal;structure|Structure|CHOICE|false|prose or lists;context|Context|CHOICE|false|general or email" />
+
+            <meta-data android:name="com.s2s.plugin.language" android:value="en" />
+            <meta-data android:name="com.s2s.plugin.model" android:value="superwhisper/s1-mini-GGUF (Q4_K_M), based on Qwen/Qwen3-0.6B" />
+            <meta-data
+                android:name="com.s2s.plugin.license"
+                android:value="Apache 2.0 with naming requirement: keeps the name &quot;S1-mini&quot; by &quot;Superwhisper&quot;." />
+            <!-- So a host can warn before a plugin exhausts storage/RAM. -->
+            <meta-data android:name="com.s2s.plugin.approxModelBytes" android:value="484442112" />
+        </service>
+    </application>
+
+</manifest>

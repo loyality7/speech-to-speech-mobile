@@ -20,8 +20,21 @@
       packages, so Jarvis can see plugins and nothing else.
     -->
     <queries>
+        <!--
+          One generic action covers every plugin, of any capability type —
+          the type is metadata, so a new capability needs no change here.
+          Android gives no wildcard for package visibility, so naming one
+          action at build time is the furthest this can be generalised.
+        -->
+        <intent>
+            <action android:name="com.s2s.plugin.action.PLUGIN" />
+        </intent>
+        <!-- Earlier per-capability actions, so already-installed plugins remain visible. -->
         <intent>
             <action android:name="com.s2s.plugin.action.TOOL_PLUGIN" />
+        </intent>
+        <intent>
+            <action android:name="com.s2s.plugin.action.TEXT_NORMALIZER_PLUGIN" />
         </intent>
     </queries>
 
