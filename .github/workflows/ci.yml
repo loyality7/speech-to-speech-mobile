@@ -19,6 +19,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - run: ./scripts/check-boundaries.sh
+
       - run: ./gradlew :bindings:android:testDebugUnitTest
 
       - run: ./gradlew :examples:android-demo:assembleDebug
