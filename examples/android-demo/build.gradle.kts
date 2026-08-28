@@ -60,8 +60,8 @@ dependencies {
     // s2s-host plugins — core itself has no concrete LanguageModel of its
     // own. Proves the host can switch between real (not fake) providers
     // without touching speech-to-speech-mobile or s2s-agent at all.
-    implementation("com.github.loyality7.s2s-llm:llama-cpp:0.2.0")
-    implementation("com.github.loyality7.s2s-llm:remote:0.2.0")
+    implementation("com.github.loyality7.s2s-llm:llama-cpp:0.3.0")
+    implementation("com.github.loyality7.s2s-llm:remote:0.3.0")
 
     // Same story for context — core has no concrete ContextEngine of its own.
     implementation("com.github.loyality7.s2s-context:local:0.1.1")
@@ -88,5 +88,5 @@ dependencies {
     // S2SEngine deliberately does not. The demo drives voice input through
     // this instead of S2SEngine's own single-shot generate() path (see
     // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.1.4")
+    implementation("com.github.loyality7:s2s-agent:0.1.5")
 }

@@ -170,6 +170,10 @@ class MainActivity : Activity() {
 
         openTtsTestBtn = Button(this).apply { text = "🔊 Test TTS Voice" }
         openSttTestBtn = Button(this).apply { text = "🎙️ Test STT Model" }
+        val openAgentTestBtn = Button(this).apply { text = "🧪 Test Agent Tools" }
+        openAgentTestBtn.setOnClickListener {
+            startActivity(Intent(this, AgentChatTestActivity::class.java))
+        }
 
         val navParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
             marginStart = 2
@@ -177,6 +181,7 @@ class MainActivity : Activity() {
         }
         navRow.addView(openTtsTestBtn, navParams)
         navRow.addView(openSttTestBtn, navParams)
+        navRow.addView(openAgentTestBtn, navParams)
         root.addView(navRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         root.addView(label("Hugging Face Token (for gated repos, e.g. Gemma):", padTop = 4))

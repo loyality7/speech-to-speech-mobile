@@ -45,6 +45,12 @@
             android:exported="false"
             android:label="Hugging Face Models"
             android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".AgentChatTestActivity"
+            android:exported="false"
+            android:label="Agent Tool-Calling Tester"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>
