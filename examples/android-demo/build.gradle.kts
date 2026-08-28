@@ -74,15 +74,15 @@ dependencies {
 
     // s2s-host: PluginRegistry/HostComposer — the composition root that
     // replaces this app's own hardcoded LlamaLanguageModel(...)/
-    // SqliteContextEngine(...) construction.
+    // SqliteContextEngine(...) construction. Adds availability distinction
+    // (known/available/enabled/selected/composable) to PluginDescriptor/
+    // PluginRegistry in 0.1.2.
     //
-    // Capitalized groupId is deliberate, not a typo: JitPack indexed this
-    // repo's first successful build under com.github.Loyality7 (a casing
-    // race during initial publish) and only resolves that exact coordinate
-    // for this artifact — every other s2s-* dependency here correctly uses
-    // lowercase. Confirmed via https://jitpack.io/api/builds/com.github.Loyality7/s2s-host/0.1.1
-    // returning status "ok" while the lowercase equivalent 404s.
-    implementation("com.github.Loyality7:s2s-host:0.1.1")
+    // 0.1.1 briefly needed a capitalized com.github.Loyality7 coordinate due
+    // to a one-off JitPack indexing race on first publish; 0.1.2 resolved
+    // cleanly under the normal lowercase coordinate, confirming that was a
+    // transient quirk, not a persistent property of this repo.
+    implementation("com.github.loyality7:s2s-host:0.1.2")
 
     // s2s-agent: AgentRuntime — owns the model/tool/context loop that
     // S2SEngine deliberately does not. The demo drives voice input through
