@@ -197,6 +197,9 @@ class S2SEngine @JvmOverloads constructor(
     /** When the assistant last started talking, for the barge-in grace window. */
     @Volatile private var speakingSince = 0L
 
+    /** Set by [beginTurn] the instant an [externalTurnHandler] call begins — see that method's comment. Read (and reset to 0) by [speakAssistantText] so it measures the whole STT-final-to-first-audio span for agent-driven turns, not just its own TTS time. */
+    @Volatile private var externalTurnStartedAt = 0L
+
     /** Set by any thread; applied by the audio thread, which owns those objects. */
     @Volatile private var resetRecognitionPending = false
 
@@ -676,6 +679,15 @@ class S2SEngine @JvmOverloads constructor(
         if (handler != null) {
             turns.begin()
             setState(S2SState.THINKING)
+            // Recorded here, not left for speakAssistantText() to set later —
+            // an external caller (AgentRuntime) may take real time (LLM/tool
+            // execution) between this point and calling speakAssistantText(),
+            // and that time is genuinely part of what the user experiences as
+            // "how long until Jarvis answers." If speakAssistantText() reset
+            // this itself, TurnMetrics.timeToFirstAudioMs would only measure
+            // TTS's own latency and silently hide the agent's entire
+            // STT-final -> final-response time from every metric/log.
+            externalTurnStartedAt = System.currentTimeMillis()
             handler(userText)
             return
         }
@@ -735,7 +747,13 @@ class S2SEngine @JvmOverloads constructor(
         chunker.reset()
         synthesisDone = false
         sawFirstAudio = false
-        turnEndedAt = System.currentTimeMillis()
+        // externalTurnStartedAt (set when this turn's utterance was first
+        // handed to the external handler) takes priority over "now" so
+        // TurnMetrics.timeToFirstAudioMs covers the agent's own processing
+        // time too, not just this method's TTS work — see beginTurn()'s
+        // comment on externalTurnStartedAt.
+        turnEndedAt = externalTurnStartedAt.takeIf { it != 0L } ?: System.currentTimeMillis()
+        externalTurnStartedAt = 0L
         firstTokenMs = 0
         setState(S2SState.THINKING)
         // speak()/markSynthesisDone() each dispatch their own work onto

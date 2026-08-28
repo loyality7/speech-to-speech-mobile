@@ -1,6 +1,7 @@
 package com.s2s.demo
 
 import android.content.Context
+import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.task.InMemoryTaskStore
 import com.s2s.context.local.SqliteContextEngine
@@ -26,6 +27,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -69,9 +73,22 @@ class JarvisRuntime(private val appContext: Context) {
         private set
     var agentRuntime: AgentRuntime? = null
         private set
+    private var contextEngine: ContextEngine? = null
 
     /** Derived, not tracked separately — [engine] is non-null for exactly the lifetime a call to [start] has succeeded and [stop] hasn't yet cleared it. */
     val isRunning: Boolean get() = engine != null
+
+    private val _agentEvents = MutableSharedFlow<AgentEvent>(extraBufferCapacity = 64)
+
+    /**
+     * The one seam a host UI needs to show the assistant's final response —
+     * `AgentRuntime.run()` drives generation through `S2SEngine.speakAssistantText()`
+     * (audio only), so nothing before this existed to put that same text on
+     * screen. The UI observes [AgentEvent.TaskCompleted]/[AgentEvent.TaskFailed]
+     * here; it never touches [agentRuntime] or any tool/generation internals —
+     * those stay inside [AgentEvent]'s existing "safe metadata only" contract.
+     */
+    val agentEvents: SharedFlow<AgentEvent> = _agentEvents.asSharedFlow()
 
     private val agentExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "Jarvis-Agent") }
     private val agentDispatcher = agentExecutor.asCoroutineDispatcher()
@@ -124,7 +141,9 @@ class JarvisRuntime(private val appContext: Context) {
         }
 
         runtime = AgentRuntime(e, composed.languageModel, composed.contextEngine, composed.tools, InMemoryTaskStore())
+        runtime.addListener { event -> _agentEvents.tryEmit(event) }
         agentRuntime = runtime
+        contextEngine = composed.contextEngine
         engine = e
         e.start()
         return Result.success(Unit)
@@ -132,12 +151,15 @@ class JarvisRuntime(private val appContext: Context) {
 
     /**
      * Cancels any in-flight agent turn, releases [S2SEngine] (frees mic/model
-     * resources — matches [S2SEngine.release]'s own contract), and clears
-     * [engine]/[agentRuntime] so a stale reference can't be observed after
-     * this returns. [registry] itself is NOT cleared — plugin
-     * enable/selection/config is durable host state (backed by
-     * [SharedPreferencesPluginConfigStore]), not runtime state, and survives
-     * a stop/start cycle by design.
+     * resources — matches [S2SEngine.release]'s own contract), closes
+     * [contextEngine] (fixes the SQLiteConnectionPool leak previously
+     * observed on a real device — [ContextEngine.close] didn't exist until
+     * this fix, so nothing ever released [SqliteContextEngine]'s open
+     * connection), and clears [engine]/[agentRuntime]/[contextEngine] so a
+     * stale reference can't be observed after this returns. [registry]
+     * itself is NOT cleared — plugin enable/selection/config is durable host
+     * state (backed by [SharedPreferencesPluginConfigStore]), not runtime
+     * state, and survives a stop/start cycle by design.
      */
     fun stop() {
         if (!isRunning) return
@@ -148,6 +170,8 @@ class JarvisRuntime(private val appContext: Context) {
         engine?.release()
         engine = null
         agentRuntime = null
+        contextEngine?.close()
+        contextEngine = null
     }
 
     /** Fully shuts down this runtime instance, including the dedicated agent thread — call once, when the owning component is destroyed for good (e.g. `onDestroy`), never before a plain restart (use [stop] + [start] for that). */

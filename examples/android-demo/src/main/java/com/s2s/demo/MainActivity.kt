@@ -567,6 +567,7 @@ class MainActivity : Activity() {
             if (loaded != null) {
                 engine = loaded
                 collectEvents(loaded)
+                collectAgentEvents()
                 running = true
                 toggle.text = "Stop Engine"
                 updateVoicesList()
@@ -590,6 +591,29 @@ class MainActivity : Activity() {
                     e.selectVoice(voiceList[position].id)
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+        }
+    }
+
+    /**
+     * Renders the assistant's final text, per-turn — `S2SEngine.speakAssistantText()`
+     * (the agent path's only route to TTS) never emits `AssistantDelta`/
+     * `AssistantDone`, so without this the transcript showed every user
+     * utterance but never Jarvis's reply, even though it was audibly spoken.
+     * Observes [JarvisRuntime.agentEvents] only — never touches `AgentRuntime`
+     * itself, matching the same event-boundary [collectEvents] already uses
+     * for the speech layer.
+     */
+    private fun collectAgentEvents() {
+        scope.launch {
+            jarvis.agentEvents.collect { event ->
+                when (event) {
+                    is com.s2s.agent.agent.AgentEvent.TaskCompleted ->
+                        transcript.append("Jarvis: ${event.response}\n\n")
+                    is com.s2s.agent.agent.AgentEvent.TaskFailed ->
+                        transcript.append("Jarvis: [error] ${event.message}\n\n")
+                    else -> Unit
+                }
             }
         }
     }

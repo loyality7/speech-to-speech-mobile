@@ -65,4 +65,18 @@ interface ContextEngine {
 
     /** Restores state serialized by [toJson]. */
     fun fromJson(json: String)
+
+    /**
+     * Releases any resource this implementation holds open (a database
+     * connection, a file handle, a network client) — the counterpart to
+     * whatever setup an implementation's constructor does. A stateless
+     * implementation (in-memory only) needs no override; the default is a
+     * no-op so existing implementations compile unchanged.
+     *
+     * Called by the host when the runtime using this instance stops (see
+     * `JarvisRuntime.stop()` in the Android demo) — never by [com.s2s.agent.agent.AgentRuntime]
+     * itself, which has no opinion on resource lifecycle beyond calling
+     * whatever the host wires it to.
+     */
+    fun close() {}
 }

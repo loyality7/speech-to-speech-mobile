@@ -21,8 +21,16 @@ enum class VadBackend(val windowSize: Int) {
  */
 data class VadConfig(
     val backend: VadBackend = VadBackend.SILERO,
-    /** Speech probability above which a frame counts as voice. */
-    val threshold: Float = 0.5f,
+    /**
+     * Speech probability above which a frame counts as voice.
+     *
+     * Raised from 0.5 after a real-device run: ambient room noise/TV
+     * background scored just above 0.5 often enough to open a false
+     * utterance and trigger a full agent turn on nothing the user actually
+     * said. 0.65 is still well below where genuine speech scores (typically
+     * 0.9+), so real utterances are unaffected.
+     */
+    val threshold: Float = 0.65f,
 
     /**
      * Trailing silence that closes a segment, in seconds.
