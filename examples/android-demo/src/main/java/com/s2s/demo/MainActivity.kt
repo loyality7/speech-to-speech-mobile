@@ -552,10 +552,7 @@ class MainActivity : Activity() {
                 jarvis.start(
                     config,
                     llmConfig = mapOf("modelPath" to config.models.llmModel),
-                    contextConfig = mapOf(
-                        "sessionId" to sessionId,
-                        "systemPrompt" to "Talk freely, but don't be rude. You are a helpful assistant.",
-                    ),
+                    contextConfig = mapOf("sessionId" to sessionId),
                 ).isSuccess
             } catch (ex: Throwable) {
                 Log.e("MainActivity", "Engine init failed", ex)

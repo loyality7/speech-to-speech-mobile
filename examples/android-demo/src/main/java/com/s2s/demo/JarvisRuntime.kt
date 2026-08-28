@@ -65,6 +65,26 @@ class JarvisRuntime(private val appContext: Context) {
         const val REMOTE_LLM = "remote"
         const val SQLITE_CONTEXT = "sqlite-context"
         const val CORE_TOOLS = "core-tools"
+
+        /**
+         * Real-device evidence: the prior default ("Talk freely, but don't be
+         * rude. You are a helpful assistant.") gave a small local model
+         * (Qwen2.5-0.5B) zero guidance on voice-appropriate brevity or tool
+         * usage, and it responded to a simple subtraction request by
+         * narrating a multi-step long-division-style explanation instead of
+         * calling the calculator tool. This does not fix a weak model's
+         * reasoning limits — a 0.5B model will still be a 0.5B model — but it
+         * removes the part of the poor behavior that was actually the
+         * prompt's fault: no instruction to be concise, and no instruction to
+         * prefer a registered tool over mental math.
+         */
+        const val DEFAULT_SYSTEM_PROMPT =
+            "You are Jarvis, a voice assistant. Keep answers short and " +
+                "conversational — one or two sentences unless the user asks " +
+                "for detail. When a registered tool can answer the request " +
+                "(for example, a calculation), call it instead of solving it " +
+                "yourself. Never explain your reasoning step by step unless " +
+                "asked to."
     }
 
     val registry: PluginRegistry = buildRegistry(appContext)
@@ -204,7 +224,7 @@ class JarvisRuntime(private val appContext: Context) {
             PluginDescriptor(SQLITE_CONTEXT, PluginType.CONTEXT_ENGINE, "SQLite Context", version = "0.1.0"),
             PluginProvider<ContextEngine> { config ->
                 val sessionId = config["sessionId"] ?: UUID.randomUUID().toString()
-                val systemPrompt = config["systemPrompt"] ?: "Talk freely, but don't be rude. You are a helpful assistant."
+                val systemPrompt = config["systemPrompt"] ?: DEFAULT_SYSTEM_PROMPT
                 SqliteContextEngine(context.applicationContext, sessionId, systemPrompt)
             },
         )
