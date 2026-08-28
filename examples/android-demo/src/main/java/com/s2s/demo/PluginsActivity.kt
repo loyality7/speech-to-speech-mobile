@@ -201,9 +201,14 @@ class PluginsActivity : Activity() {
             return card
         }
 
-        card.addView(
-            actionButton("Install") { confirmInstall(found) },
-        )
+        // Wrapped in a horizontal row, not added straight to the card:
+        // actionButton() uses a weight-based width (0dp + weight 1) meant
+        // for a row, and inside a vertical LinearLayout that resolves to
+        // zero width — an invisible button and an unexplained gap, which is
+        // exactly what this looked like on device.
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(actionButton("Install") { confirmInstall(found) })
+        card.addView(actions)
         return card
     }
 

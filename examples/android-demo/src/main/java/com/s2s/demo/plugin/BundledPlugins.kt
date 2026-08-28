@@ -88,11 +88,26 @@ object BundledPlugins {
                 configSchema = listOf(
                     PluginConfigField("baseUrl", "Server URL", help = "e.g. https://my-server/v1"),
                     PluginConfigField("apiKey", "API key", PluginConfigField.Type.SECRET, required = false),
+                    PluginConfigField(
+                        "model",
+                        "Model name",
+                        required = false,
+                        help = "As the server names it, e.g. gpt-4o-mini or qwen2.5-7b-instruct. Leave blank to use the server's default.",
+                    ),
                 ),
             ),
             PluginProvider<LanguageModel> { config ->
                 val baseUrl = config["baseUrl"] ?: error("remote plugin requires a 'baseUrl' config value")
-                RemoteLanguageModel(RemoteLlmConfig(baseUrl = baseUrl, apiKey = config["apiKey"]))
+                RemoteLanguageModel(
+                    RemoteLlmConfig(
+                        baseUrl = baseUrl,
+                        apiKey = config["apiKey"],
+                        // Was previously never passed, so the server always
+                        // fell back to its own default model and the setting
+                        // had no way to reach it.
+                        remoteModelName = config["model"]?.takeIf { it.isNotBlank() },
+                    ),
+                )
             },
         )
 

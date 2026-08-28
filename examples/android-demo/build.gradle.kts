@@ -70,7 +70,7 @@ dependencies {
     implementation("com.github.loyality7.s2s-llm:remote:0.3.1")
 
     // Same story for context — core has no concrete ContextEngine of its own.
-    implementation("com.github.loyality7.s2s-context:local:0.2.0")
+    implementation("com.github.loyality7.s2s-context:local:0.2.1")
 
     // Same story for tools — core defaults to NoopTools, nothing concrete.
     // s2s-tools has only one module today, so JitPack publishes it under the
@@ -94,5 +94,5 @@ dependencies {
     // S2SEngine deliberately does not. The demo drives voice input through
     // this instead of S2SEngine's own single-shot generate() path (see
     // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.1.5")
+    implementation("com.github.loyality7:s2s-agent:0.1.6")
 }

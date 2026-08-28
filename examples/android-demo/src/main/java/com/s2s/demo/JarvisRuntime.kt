@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
+import com.s2s.agent.skill.SkillRegistry
+import com.s2s.agent.skill.registerToolSkills
 import com.s2s.agent.task.InMemoryTaskStore
 import com.s2s.demo.plugin.AndroidPluginDiscovery
 import com.s2s.demo.plugin.BoundServiceTools
@@ -193,6 +195,27 @@ class JarvisRuntime(private val appContext: Context) {
             registry.setConfig(pluginId, PluginConfig(contextConfig + stored))
         }
 
+        // Check required config BEFORE composing, so a half-configured
+        // provider produces a sentence the user can act on rather than a
+        // CompositionException naming an internal failure type. The remote
+        // LLM selected with no server URL is the realistic case.
+        registry.getSelected(PluginType.LANGUAGE_MODEL)?.let { pluginId ->
+            val descriptor = registry.find(pluginId)
+            val stored = registry.getConfig(pluginId).values
+            val missing = descriptor?.configSchema
+                ?.filter { it.required && stored[it.key].isNullOrBlank() }
+                ?.map { it.label }
+                .orEmpty()
+            if (missing.isNotEmpty()) {
+                return Result.failure(
+                    IllegalStateException(
+                        "${descriptor?.displayName ?: pluginId} needs ${missing.joinToString(", ")} — " +
+                            "set it under \"Answering with\", or switch back to the on-device model.",
+                    ),
+                )
+            }
+        }
+
         val composed = HostComposer(registry).resolve().getOrElse {
             return Result.failure(it)
         }
@@ -225,7 +248,20 @@ class JarvisRuntime(private val appContext: Context) {
             return Result.failure(initResult.exceptionOrNull() ?: IllegalStateException("S2SEngine.initialize() failed"))
         }
 
-        runtime = AgentRuntime(e, composed.languageModel, composed.contextEngine, composed.tools, InMemoryTaskStore())
+        // One skill per installed tool, derived from the tools themselves —
+        // so a turn's prompt lists only the tools whose own description
+        // matches what the user said, instead of the whole catalogue. Built
+        // here, after composition, because the catalogue is whatever the
+        // enabled plugins contribute and is not known before that.
+        val skills = SkillRegistry().apply { registerToolSkills(composed.tools.definitions) }
+        runtime = AgentRuntime(
+            e,
+            composed.languageModel,
+            composed.contextEngine,
+            composed.tools,
+            InMemoryTaskStore(),
+            skills = skills,
+        )
         runtime.addListener { event -> _agentEvents.tryEmit(event) }
         agentRuntime = runtime
         contextEngine = composed.contextEngine

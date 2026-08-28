@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -82,7 +81,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        // Wrapped in a ScrollView: the screen carries model spinners, the
+        // LLM provider settings and the transcript, which together exceed a
+        // phone's height — without this the Save button below the fold was
+        // simply unreachable.
+        setContentView(ScrollView(this).apply { addView(buildUi()) })
 
         val reqs = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -281,13 +284,16 @@ class MainActivity : Activity() {
 
         transcript = TextView(this).apply {
             textSize = 15f
-            gravity = Gravity.BOTTOM
             movementMethod = ScrollingMovementMethod()
         }
-        val scroller = ScrollView(this).apply { addView(transcript) }
+        // No nested ScrollView and no weighted height: the whole screen now
+        // scrolls (see buildUi's caller), and a scrollable child inside a
+        // scrollable parent fights for drag gestures. WRAP_CONTENT lets the
+        // transcript grow and the page scroll to it — with a weight of 1
+        // inside a ScrollView it would have collapsed to nothing.
         root.addView(
-            scroller,
-            LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f).apply { topMargin = 12 },
+            transcript,
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = 12 },
         )
         return root
     }
@@ -348,6 +354,10 @@ class MainActivity : Activity() {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["apiKey"].orEmpty())
         }
+        val modelInput = EditText(this).apply {
+            hint = "Model name (optional, e.g. gpt-4o-mini)"
+            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["model"].orEmpty())
+        }
         val saveRemoteBtn = Button(this).apply { text = "Save server settings" }
         saveRemoteBtn.setOnClickListener {
             val url = urlInput.text.toString().trim()
@@ -361,6 +371,10 @@ class MainActivity : Activity() {
                     buildMap {
                         put("baseUrl", url)
                         keyInput.text.toString().trim().takeIf { it.isNotEmpty() }?.let { put("apiKey", it) }
+                        // Blank means "let the server pick" — storing an
+                        // empty string would send an empty model name and
+                        // most servers reject that.
+                        modelInput.text.toString().trim().takeIf { it.isNotEmpty() }?.let { put("model", it) }
                     },
                 ),
             )
@@ -369,6 +383,7 @@ class MainActivity : Activity() {
         remoteBox.addView(label("Server URL:", padTop = 4))
         remoteBox.addView(urlInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         remoteBox.addView(keyInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        remoteBox.addView(modelInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         remoteBox.addView(saveRemoteBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         // Reflect what is actually selected rather than assuming a default —
@@ -378,9 +393,22 @@ class MainActivity : Activity() {
         providers.indexOfFirst { it.first == current }.takeIf { it >= 0 }?.let { providerSpinner.setSelection(it) }
         remoteBox.visibility = if (current == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
 
+        // Android fires onItemSelected once when the listener is attached,
+        // with the spinner's current position. Acting on that would call
+        // select() during layout and could silently switch the user's
+        // provider to whatever happened to be at index 0 — so the first
+        // callback is treated as "restoring what is already selected", not
+        // as a choice.
+        var ignoreFirstCallback = true
+
         providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val (pluginId, label) = providers[position]
+                if (ignoreFirstCallback) {
+                    ignoreFirstCallback = false
+                    remoteBox.visibility = if (pluginId == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
+                    return
+                }
                 jarvis.pluginManager.select(pluginId, com.s2s.host.core.PluginType.LANGUAGE_MODEL)
                 remoteBox.visibility = if (pluginId == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
                 // Deliberately does not restart a running engine: swapping
@@ -665,14 +693,20 @@ class MainActivity : Activity() {
             // directly — see JarvisRuntime for what's registered, why, and
             // how the speech<->agent thread boundary is owned.
             val sessionId = java.util.UUID.randomUUID().toString()
+            // Keep the failure reason, not just a boolean: start() reports
+            // actionable problems ("Remote needs Server URL"), and throwing
+            // that away left the user with "check logcat" for something they
+            // could have fixed in two taps.
+            var failureMessage: String? = null
             val started = try {
                 jarvis.start(
                     config,
                     llmConfig = mapOf("modelPath" to config.models.llmModel),
                     contextConfig = mapOf("sessionId" to sessionId),
-                ).isSuccess
+                ).onFailure { failureMessage = it.message }.isSuccess
             } catch (ex: Throwable) {
                 Log.e("MainActivity", "Engine init failed", ex)
+                failureMessage = ex.message
                 false
             }
             val loaded = if (started) jarvis.engine else null
@@ -686,7 +720,7 @@ class MainActivity : Activity() {
                 toggle.text = "Stop Engine"
                 updateVoicesList()
             } else {
-                status.text = "Failed to initialize pipeline (check logcat S2S*)"
+                status.text = failureMessage ?: "Failed to initialize pipeline (check logcat S2S*)"
             }
         }
     }
