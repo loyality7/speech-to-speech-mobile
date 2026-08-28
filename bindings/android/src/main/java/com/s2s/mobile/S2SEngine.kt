@@ -683,7 +683,7 @@ class S2SEngine @JvmOverloads constructor(
             // an external caller (AgentRuntime) may take real time (LLM/tool
             // execution) between this point and calling speakAssistantText(),
             // and that time is genuinely part of what the user experiences as
-            // "how long until Jarvis answers." If speakAssistantText() reset
+            // "how long until the assistant answers." If speakAssistantText() reset
             // this itself, TurnMetrics.timeToFirstAudioMs would only measure
             // TTS's own latency and silently hide the agent's entire
             // STT-final -> final-response time from every metric/log.

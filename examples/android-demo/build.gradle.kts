@@ -70,7 +70,7 @@ dependencies {
     implementation("com.github.loyality7.s2s-llm:remote:0.3.1")
 
     // Same story for context — core has no concrete ContextEngine of its own.
-    implementation("com.github.loyality7.s2s-context:local:0.1.1")
+    implementation("com.github.loyality7.s2s-context:local:0.2.0")
 
     // Same story for tools — core defaults to NoopTools, nothing concrete.
     // s2s-tools has only one module today, so JitPack publishes it under the

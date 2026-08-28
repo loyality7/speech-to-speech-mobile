@@ -184,10 +184,89 @@ class AgentChatTestActivity : Activity() {
                 statusText.text = "Ready — model loaded, ${composed.tools.definitions.size} tool(s) registered: " +
                     composed.tools.definitions.joinToString(", ") { it.name }
                 sendBtn.isEnabled = true
+
+                // Real-device memory measurements, on the actual SQLite this
+                // phone ships (with FTS5, unlike Robolectric). Runs once at
+                // init off the UI thread: §29 wants numbers from hardware,
+                // and a JVM figure would be measuring the wrong machine.
+                withContext(Dispatchers.IO) { benchmarkMemory(composed.contextEngine) }
             } catch (ex: Throwable) {
                 appendTrace("INIT EXCEPTION: ${Log.getStackTraceString(ex)}")
                 statusText.text = "Init failed — see log"
             }
+        }
+    }
+
+    /**
+     * Measures memory write/retrieval/identity latency on this device, and
+     * checks identity + memory actually survive being re-opened.
+     *
+     * Logged rather than shown in the UI, and content is never logged —
+     * only counts and durations, per the rule that diagnostics may expose
+     * metadata but not private memory text.
+     *
+     * Uses a throwaway session id and cleans up after itself so running the
+     * screen does not pollute the user's real memory store.
+     */
+    private fun benchmarkMemory(contextEngine: com.s2s.mobile.pipeline.ContextEngine) {
+        val engine = contextEngine as? com.s2s.context.local.SqliteContextEngine ?: run {
+            Log.i(BENCH_TAG, "selected context provider is not the local SQLite one — skipping memory benchmark")
+            return
+        }
+
+        val session = "bench-${System.currentTimeMillis()}"
+        val scope = com.s2s.context.local.MemoryScope.Project(session)
+
+        try {
+            // Write throughput.
+            val writeStart = System.currentTimeMillis()
+            repeat(BENCH_ROWS) { i ->
+                engine.memories.create(
+                    scope = scope,
+                    content = "Benchmark fact number $i concerning topic ${i % 40}.",
+                    importance = 0.5f,
+                )
+            }
+            val writeTotal = System.currentTimeMillis() - writeStart
+
+            // Retrieval, warm and repeated — one sample would mostly measure
+            // whatever the OS was doing at that instant.
+            val samples = mutableListOf<Long>()
+            repeat(BENCH_QUERIES) {
+                val t0 = System.nanoTime()
+                engine.memories.relevant(
+                    sessionId = session,
+                    query = "benchmark fact concerning topic 7",
+                    limit = 3,
+                    projectIds = setOf(session),
+                )
+                samples += (System.nanoTime() - t0) / 1_000_000
+            }
+            val sorted = samples.sorted()
+
+            // Full context assembly — the number that actually sits on the
+            // voice path, since this is what runs per turn.
+            engine.addUser("what do I usually prefer?")
+            val ctxStart = System.nanoTime()
+            engine.messages()
+            val ctxMs = (System.nanoTime() - ctxStart) / 1_000_000
+
+            // Identity round trip.
+            val idStart = System.nanoTime()
+            engine.identities.saveIdentity(com.s2s.context.local.AgentIdentity(displayName = "Bench"))
+            val loadedName = engine.identities.loadIdentity()?.displayName
+            val idMs = (System.nanoTime() - idStart) / 1_000_000
+
+            Log.i(
+                BENCH_TAG,
+                "memory bench: writes=$BENCH_ROWS in ${writeTotal}ms (${writeTotal / BENCH_ROWS.toFloat()}ms/row), " +
+                    "retrieval median=${sorted[sorted.size / 2]}ms p90=${sorted[(sorted.size * 9) / 10]}ms max=${sorted.last()}ms, " +
+                    "context assembly=${ctxMs}ms, identity round trip=${idMs}ms, identity persisted=${loadedName == "Bench"}",
+            )
+        } catch (e: Throwable) {
+            Log.w(BENCH_TAG, "memory benchmark failed", e)
+        } finally {
+            runCatching { engine.memories.deleteScope(scope) }
         }
     }
 
@@ -243,5 +322,12 @@ class AgentChatTestActivity : Activity() {
         super.onDestroy()
         scope.cancel()
         engine?.release()
+    }
+
+    private companion object {
+        const val BENCH_TAG = "S2S-MemoryBench"
+        /** Enough rows that retrieval is doing real work, few enough that init isn't visibly delayed. */
+        const val BENCH_ROWS = 500
+        const val BENCH_QUERIES = 20
     }
 }

@@ -74,7 +74,7 @@ interface ContextEngine {
      * no-op so existing implementations compile unchanged.
      *
      * Called by the host when the runtime using this instance stops (see
-     * `JarvisRuntime.stop()` in the Android demo) — never by [com.s2s.agent.agent.AgentRuntime]
+     * the Android demo's runtime teardown) — never by [com.s2s.agent.agent.AgentRuntime]
      * itself, which has no opinion on resource lifecycle beyond calling
      * whatever the host wires it to.
      */
