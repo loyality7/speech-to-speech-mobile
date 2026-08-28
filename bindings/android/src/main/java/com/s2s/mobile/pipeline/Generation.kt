@@ -37,6 +37,23 @@ interface LanguageModel {
 
     fun generate(messages: List<ChatMessage>, sink: TokenSink, overrides: GenerationOverrides? = null)
 
+    /**
+     * One-shot, non-streaming generation constrained to match [jsonSchema] —
+     * grammar-constrained decoding, not prompt-based "please reply with
+     * JSON" hoping. Exists specifically so a caller (e.g. an agent harness
+     * deciding whether a turn needs a tool call) can get a reliably-shaped
+     * answer instead of parsing free text and hoping it matches.
+     *
+     * Default implementation fails — most [LanguageModel] backends (remote
+     * HTTP APIs without a schema parameter, or a local backend whose runtime
+     * has no schema-constrained decoding) have no way to honor this, and a
+     * caller must be able to detect that and fall back to normal [generate]
+     * rather than silently getting unconstrained text back under a
+     * structured-sounding name.
+     */
+    fun generateStructured(messages: List<ChatMessage>, jsonSchema: String, overrides: GenerationOverrides? = null): Result<String> =
+        Result.failure(UnsupportedOperationException("${this::class.simpleName} does not support generateStructured"))
+
     fun cancel()
 
     /**
