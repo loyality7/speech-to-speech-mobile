@@ -345,18 +345,23 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
+        // Pre-filled with BundledPlugins' actual default, not blank — the
+        // provider applies this same fallback if the field is left empty,
+        // so showing an empty box here was a lie about what the app would
+        // actually connect to. Still a real, editable EditText: typing over
+        // it and saving stores the user's own value, same as before.
         val urlInput = EditText(this).apply {
             hint = "https://your-server/v1"
-            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["baseUrl"].orEmpty())
+            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["baseUrl"]?.takeIf { it.isNotBlank() } ?: BundledPlugins.OPENROUTER_DEFAULT_BASE_URL)
         }
         val keyInput = EditText(this).apply {
-            hint = "API key (optional)"
+            hint = "API key (required for OpenRouter — openrouter.ai/keys)"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["apiKey"].orEmpty())
         }
         val modelInput = EditText(this).apply {
             hint = "Model name (optional, e.g. gpt-4o-mini)"
-            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["model"].orEmpty())
+            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["model"]?.takeIf { it.isNotBlank() } ?: BundledPlugins.OPENROUTER_DEFAULT_MODEL)
         }
         val saveRemoteBtn = Button(this).apply { text = "Save server settings" }
         saveRemoteBtn.setOnClickListener {
