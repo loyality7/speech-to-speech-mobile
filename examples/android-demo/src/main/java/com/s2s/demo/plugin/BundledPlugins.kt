@@ -17,6 +17,7 @@ import com.s2s.mobile.pipeline.ContextEngine
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.Tools
 import com.s2s.tools.core.CalculatorTool
+import com.s2s.tools.core.MemoryTools
 import com.s2s.tools.core.ToolRegistry
 import java.util.UUID
 
@@ -67,7 +68,27 @@ object BundledPlugins {
             "instead of solving it yourself. Never explain your reasoning step " +
             "by step unless asked to."
 
-    fun registerAll(manager: PluginManager, context: Context) {
+    /**
+     * [considerMemory]/[recallMemory] back the `remember`/`recall` tools
+     * (see [com.s2s.tools.core.MemoryTools]) — supplied here rather than
+     * closed over directly by [CalculatorTool]'s stateless pattern because
+     * they need the live [SqliteContextEngine] the currently-running turn is
+     * using, which does not exist yet at plugin-registration time (this
+     * runs once at [com.s2s.demo.JarvisRuntime] construction; a fresh
+     * `SqliteContextEngine` is built on every [com.s2s.demo.JarvisRuntime.start]).
+     * [com.s2s.demo.JarvisRuntime.considerForMemory]/`recallFromMemory`
+     * resolve that engine lazily at call time, so passing them as bound
+     * method references here is enough — no need for the composition-time
+     * [com.s2s.host.core.ContextAwareToolsProvider] seam, which exists for a
+     * plugin that isn't `JarvisRuntime` itself and has no other way to reach
+     * the resolved `ContextEngine`.
+     */
+    fun registerAll(
+        manager: PluginManager,
+        context: Context,
+        considerMemory: (String) -> String,
+        recallMemory: (String) -> String,
+    ) {
         val app = context.applicationContext
 
         manager.registerBundled(
@@ -149,9 +170,14 @@ object BundledPlugins {
                 version = "0.1.0",
                 source = PluginSource.BUNDLED,
                 availability = PluginAvailability.BUNDLED,
-                description = "Built-in tools. Currently a calculator.",
+                description = "Built-in tools: a calculator, and remember/recall for durable memory.",
             ),
-            PluginProvider<Tools> { ToolRegistry().also { CalculatorTool.registerOn(it) } },
+            PluginProvider<Tools> {
+                ToolRegistry().also {
+                    CalculatorTool.registerOn(it)
+                    MemoryTools(considerMemory, recallMemory).registerOn(it)
+                }
+            },
         )
 
         listOf(LLAMA_CPP, REMOTE_LLM, SQLITE_CONTEXT, CORE_TOOLS).forEach { manager.enable(it) }

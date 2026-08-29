@@ -70,13 +70,13 @@ dependencies {
     implementation("com.github.loyality7.s2s-llm:remote:0.3.5")
 
     // Same story for context — core has no concrete ContextEngine of its own.
-    implementation("com.github.loyality7.s2s-context:local:0.2.1")
+    implementation("com.github.loyality7.s2s-context:local:0.2.2")
 
     // Same story for tools — core defaults to NoopTools, nothing concrete.
     // s2s-tools has only one module today, so JitPack publishes it under the
     // plain repo-name coordinate (no ".s2s-tools" groupId suffix, no module
     // name) rather than the multi-module convention s2s-llm/s2s-context use.
-    implementation("com.github.loyality7:s2s-tools:0.1.1")
+    implementation("com.github.loyality7:s2s-tools:0.2.0")
 
     // s2s-host: PluginRegistry/HostComposer — the composition root that
     // replaces this app's own hardcoded LlamaLanguageModel(...)/
@@ -88,7 +88,7 @@ dependencies {
     // to a one-off JitPack indexing race on first publish; 0.1.2 resolved
     // cleanly under the normal lowercase coordinate, confirming that was a
     // transient quirk, not a persistent property of this repo.
-    implementation("com.github.loyality7:s2s-host:0.3.2")
+    implementation("com.github.loyality7:s2s-host:0.3.3")
 
     // s2s-agent: AgentRuntime — owns the model/tool/context loop that
     // S2SEngine deliberately does not. The demo drives voice input through

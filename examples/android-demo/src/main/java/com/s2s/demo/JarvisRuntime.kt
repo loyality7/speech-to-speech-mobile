@@ -106,37 +106,54 @@ class JarvisRuntime(private val appContext: Context) {
     }
 
     /**
-     * Runs [utterance] through [SqliteContextEngine.memoryWriter], if the
-     * selected context engine is the SQLite one. A no-op for any other
-     * [com.s2s.host.core.PluginType.CONTEXT_ENGINE] provider, and for every
-     * ordinary sentence — [com.s2s.context.local.MemoryWriter.consider]
-     * itself defaults to [MemoryDecision.Ignored] unless the text is an
-     * explicit request ("remember that…", "I prefer…") or a duplicate of
-     * something already stored, so this call is cheap and safe on every
-     * turn, not just the rare one that actually writes something.
+     * The `remember` tool's backing closure — passed to [com.s2s.tools.core.MemoryTools]
+     * when composing the TOOLS capability (see [buildRegistry]/[BundledPlugins]).
      *
-     * Never allowed to fail or slow down a turn: this runs after the
-     * response has already been queued for speech, and a memory-store
-     * exception must not read to the user as the assistant having failed to
-     * answer.
+     * Called only when the model itself decides to invoke `remember`, which
+     * IS the judgment call [com.s2s.context.local.MemoryWriter] used to guess
+     * at from a phrase list — a real device caught that guess storing
+     * "Hello cookies, remember this" verbatim because the substring
+     * "remember this" appeared anywhere in the sentence. The model's own
+     * generation already reasoning about the conversation replaces that
+     * guess for free, with no second LLM call.
+     *
+     * Still goes through the real gate unchanged: [explicit] only marks that
+     * a caller judged this worth keeping, [MemoryWriter.consider] still
+     * enforces provenance/scope/dedup regardless of who's asking.
      */
-    private fun considerForMemory(utterance: String) {
-        val store = sqliteMemoryStore ?: return
-        runCatching {
+    private fun considerForMemory(content: String): String {
+        val store = sqliteMemoryStore ?: return "Memory is not available with the current context provider."
+        return runCatching {
             val decision = store.memoryWriter.consider(
                 MemoryCandidate(
-                    content = utterance,
+                    content = content,
                     scope = MemoryScope.User,
                     provenance = MemoryProvenance.USER,
+                    explicit = true,
                 ),
             )
             when (decision) {
-                is MemoryDecision.Stored -> Log.i(TAG, "memory stored: \"${decision.memory.content}\"")
-                is MemoryDecision.Updated -> Log.i(TAG, "memory updated: \"${decision.memory.content}\"")
-                is MemoryDecision.Duplicate -> Log.i(TAG, "memory already known: \"${decision.existing.content}\"")
-                is MemoryDecision.Ignored -> Log.i(TAG, "memory not stored: ${decision.reason}")
+                is MemoryDecision.Stored -> "Stored: ${decision.memory.content}".also { Log.i(TAG, "memory stored: \"${decision.memory.content}\"") }
+                is MemoryDecision.Updated -> "Updated: ${decision.memory.content}".also { Log.i(TAG, "memory updated: \"${decision.memory.content}\"") }
+                is MemoryDecision.Duplicate -> "Already known: ${decision.existing.content}".also { Log.i(TAG, "memory already known: \"${decision.existing.content}\"") }
+                is MemoryDecision.Ignored -> "Not stored: ${decision.reason}".also { Log.i(TAG, "memory not stored: ${decision.reason}") }
             }
-        }.onFailure { Log.w(TAG, "memory consideration failed — turn already answered, continuing", it) }
+        }.getOrElse {
+            Log.w(TAG, "memory write failed", it)
+            "Could not store that right now."
+        }
+    }
+
+    /** The `recall` tool's backing closure — searches memory for [query]. See [considerForMemory]'s doc for why this is a tool call, not automatic. */
+    private fun recallFromMemory(query: String): String {
+        val store = sqliteMemoryStore ?: return "Memory is not available with the current context provider."
+        return runCatching {
+            val found = store.memories.relevant(sessionId = currentSessionId.orEmpty(), query = query, limit = 5)
+            if (found.isEmpty()) "No relevant memory found for: $query" else found.joinToString("; ") { it.content }
+        }.getOrElse {
+            Log.w(TAG, "memory recall failed", it)
+            "Could not search memory right now."
+        }
     }
 
     /** The selected normalizer plugin, or null if none is installed/enabled/selected. Never throws — normalization is optional. */
@@ -169,6 +186,9 @@ class JarvisRuntime(private val appContext: Context) {
     var agentRuntime: AgentRuntime? = null
         private set
     private var contextEngine: ContextEngine? = null
+
+    /** Set at the start of [start], read by [recallFromMemory] — the session whose SESSION-scoped memories should be visible to this runtime's own recall calls. */
+    private var currentSessionId: String? = null
 
     /**
      * [contextEngine] narrowed to its concrete type, when the SQLite-backed
@@ -281,6 +301,7 @@ class JarvisRuntime(private val appContext: Context) {
 
         lateinit var runtime: AgentRuntime
         val sessionId = UUID.randomUUID().toString()
+        currentSessionId = sessionId
         val e = S2SEngine(
             appContext,
             config,
@@ -303,27 +324,16 @@ class JarvisRuntime(private val appContext: Context) {
                         Log.i(TAG, "barge-in: cancelled the in-flight turn for this utterance")
                     }
                     val normalized = normalizeTranscript(text)
+                    // No automatic memory consideration here anymore — the
+                    // model decides by calling the `remember` tool (see
+                    // considerForMemory's doc for why: a phrase-list guess
+                    // stored "Hello cookies, remember this" verbatim on a
+                    // real device, because it merely contained the substring
+                    // "remember this"). AgentRuntime.run() already routes a
+                    // remember/recall tool call through ToolCoordinator like
+                    // any other tool, so nothing extra is needed here.
                     runCatching { runtime.run(normalized) }
                         .onFailure { Log.w(TAG, "turn failed: ${it.message}", it) }
-
-                    // The gate every conversation-derived memory goes through
-                    // already exists (MemoryWriter) and was already exposed on
-                    // SqliteContextEngine — nothing here decides what is worth
-                    // remembering, that logic stays in s2s-context. This is
-                    // only the missing call site: after the turn has already
-                    // been spoken (S2SEngine.speakAssistantText() returns once
-                    // queued, not once played, so this adds no perceived
-                    // latency to the response), consider the user's own
-                    // utterance as a candidate.
-                    //
-                    // USER provenance + MemoryScope.User is deliberate: that
-                    // combination is the only one MemoryWriter will actually
-                    // store a DURABLE memory from without an explicit
-                    // importance override (see its provenance-boundary check),
-                    // and User scope is visible across every future session —
-                    // sessionId is randomly regenerated on every app start, so
-                    // Session-scoped memory would never survive a restart.
-                    considerForMemory(normalized)
                 }
             },
         )
@@ -393,6 +403,7 @@ class JarvisRuntime(private val appContext: Context) {
         agentRuntime = null
         contextEngine?.close()
         contextEngine = null
+        currentSessionId = null
         // Unbinds and tells the plugin to free its model — otherwise a
         // 462 MiB normalizer stays resident in another process after this
         // runtime has stopped needing it.
@@ -428,7 +439,7 @@ class JarvisRuntime(private val appContext: Context) {
         )
         pluginManager = manager
 
-        BundledPlugins.registerAll(manager, app)
+        BundledPlugins.registerAll(manager, app, ::considerForMemory, ::recallFromMemory)
 
         // Re-register anything the user previously installed. Discovery
         // alone never activates a plugin — only a plugin with a stored
