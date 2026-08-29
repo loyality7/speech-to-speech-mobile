@@ -702,6 +702,22 @@ class S2SEngine @JvmOverloads constructor(
      * Their earlier words are kept and the turn is restarted with everything
      * they have said. Discarding the first half — which is what treating this as
      * an interruption did — answered only the fragment after the pause.
+     *
+     * Real defect this fixes: this used to call [startGeneration] unconditionally
+     * — the internal, non-agent generation path — even when [externalTurnHandler]
+     * was set. [beginTurn] hands a turn to the external handler and returns
+     * immediately (the handler dispatches async); while that generation is still
+     * in flight, THINKING state routes a second utterance here, and this then
+     * fired a SECOND, completely independent call into the same [languageModel]
+     * instance the external handler (an agent harness) was still using — with no
+     * shared WIP tracking, no shared cancellation, nothing. On a real device this
+     * produced two overlapping HTTP calls into the same [LanguageModel], and
+     * whichever one's cancellation the harness owned never reached this one:
+     * both died silently, no reply, no TTS, for every utterance after.
+     *
+     * An external handler must own EVERY turn once one is in play, the same way
+     * [beginTurn] already treats it as the sole authority — not just the first
+     * utterance of it.
      */
     private fun continueTurn(moreText: String) {
         val merged = listOfNotNull(pendingUserText, moreText)
@@ -712,6 +728,19 @@ class S2SEngine @JvmOverloads constructor(
 
         pendingUserText = merged
         emit(S2SEvent.UserTranscript(merged, isFinal = true))
+
+        val handler = externalTurnHandler
+        if (handler != null) {
+            // Same contract as beginTurn(): the handler owns everything from
+            // here — recording the turn, generating, deciding what the result
+            // means, eventually calling speakAssistantText(). Do NOT also
+            // touch history or call startGeneration(); this turn is already
+            // owned by whatever the first utterance handed it to.
+            externalTurnStartedAt = System.currentTimeMillis()
+            handler(merged)
+            return
+        }
+
         // Replace rather than append, or the model sees the half-question twice.
         history.replaceLastUser(merged)
         startGeneration()

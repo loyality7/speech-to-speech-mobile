@@ -175,4 +175,56 @@ class ExternalTurnHandlerTest {
 
         assertTrue(synth.synthesizedTexts.any { it.contains("final answer") })
     }
+
+    @Test
+    fun `continueTurn routes to the external handler too, not generated internally`() = runBlocking {
+        // Real defect this reproduces: onFrame's THINKING branch calls
+        // continueTurn() when a second utterance arrives while a turn is
+        // still in flight. continueTurn() used to call startGeneration()
+        // unconditionally — the internal path — even with an
+        // externalTurnHandler set. That fired a second, uncoordinated
+        // LanguageModel.generate() call alongside whatever the handler (an
+        // agent harness) was still doing with the SAME instance, with no
+        // shared cancellation. On a real device this produced two
+        // overlapping remote calls and both replies were lost — no TTS, no
+        // error, for every utterance after the first.
+        //
+        // Exercises continueTurn() directly via reflection rather than
+        // driving the full mic/speaker pipeline through start() — the other
+        // tests in this file already prove beginTurn()'s equivalent contract
+        // through the public sendText() API; Robolectric's AudioTrack stub
+        // does not support the real start()/onFrame path this bug lives on.
+        val llm = RecordingLanguageModel()
+        val history = RecordingContextEngine()
+        val received = mutableListOf<String>()
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val e = S2SEngine(
+            context,
+            testConfig(),
+            languageModel = llm,
+            history = history,
+            vad = FakeVad(),
+            recognizer = FakeRecognizer(),
+            synthesizer = FakeSynthesizer(),
+            microphone = FakeMic(),
+            externalTurnHandler = { text -> received += text },
+        )
+        e.initialize().getOrThrow()
+
+        // Puts the engine into the state continueTurn() assumes: a turn
+        // already in flight via the external handler, same as beginTurn()
+        // would after the first utterance.
+        e.sendText("first utterance")
+
+        val continueTurnMethod = S2SEngine::class.java.getDeclaredMethod("continueTurn", String::class.java)
+        continueTurnMethod.isAccessible = true
+        continueTurnMethod.invoke(e, "second utterance")
+
+        // continueTurn() merges with pendingUserText by design (see its own
+        // doc: "their earlier words are kept") — the handler correctly sees
+        // the whole utterance-so-far, not just the new fragment.
+        assertEquals(listOf("first utterance", "first utterance second utterance"), received)
+        assertEquals("internal generate() must never run once an external handler owns the turn", 0, llm.generateCallCount)
+        assertEquals("history must stay untouched — the external handler owns recording the turn", 0, history.addUserCallCount)
+    }
 }
