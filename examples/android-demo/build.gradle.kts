@@ -94,5 +94,5 @@ dependencies {
     // S2SEngine deliberately does not. The demo drives voice input through
     // this instead of S2SEngine's own single-shot generate() path (see
     // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.1.7")
+    implementation("com.github.loyality7:s2s-agent:0.1.8")
 }

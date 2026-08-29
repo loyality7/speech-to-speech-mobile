@@ -237,7 +237,18 @@ class JarvisRuntime(private val appContext: Context) {
                 // class doc) — and scoped to runtimeScope so stop()'s
                 // scope.cancel() actually reaches an in-flight turn instead
                 // of leaving an orphaned, uncancellable Thread running.
-                runtimeScope.launch { runtime.run(normalizeTranscript(text)) }
+                runtimeScope.launch {
+                    // Barge-in: stop the turn already running before starting
+                    // this one. AgentRuntime enforces WIP=1 per session, so
+                    // without this run() throws and — inside a bare launch —
+                    // the coroutine died silently. On a real device that meant
+                    // the user spoke, nothing answered, and nothing was logged.
+                    if (runtime.cancelSession(sessionId)) {
+                        Log.i(TAG, "barge-in: cancelled the in-flight turn for this utterance")
+                    }
+                    runCatching { runtime.run(normalizeTranscript(text)) }
+                        .onFailure { Log.w(TAG, "turn failed: ${it.message}", it) }
+                }
             },
         )
 

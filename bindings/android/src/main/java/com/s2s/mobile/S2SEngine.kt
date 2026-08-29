@@ -24,6 +24,7 @@ import com.s2s.mobile.stt.OfflineVadRecognizer
 import com.s2s.mobile.stt.SherpaStreamingRecognizer
 import com.s2s.mobile.tts.AudioRestorer
 import com.s2s.mobile.text.SentenceChunker
+import com.s2s.mobile.text.SpeakableText
 import com.s2s.mobile.tts.SherpaSynthesizer
 import com.s2s.mobile.vad.SileroVad
 import kotlinx.coroutines.Dispatchers
@@ -742,7 +743,22 @@ class S2SEngine @JvmOverloads constructor(
     fun speakAssistantText(text: String) {
         if (text.isBlank()) return
         check(initialized) { "initialize() must succeed before speakAssistantText()" }
-        val turn = turns.begin()
+        // ADOPT the turn beginTurn() already opened; do not start another one.
+        //
+        // Starting a new generation here meant an external turn bumped the
+        // counter twice — once when the utterance was dispatched, once when the
+        // reply came back. With one turn in flight that is harmless, but a real
+        // device deadlocked on two: the user barged in during a long reply, so
+        // two turns started 1.5s apart, and each one's speakAssistantText()
+        // invalidated the other's in-flight audio. Both replies were discarded
+        // by isStale() and the assistant went permanently silent — STT kept
+        // decoding and the LLM kept answering, but nothing was ever spoken
+        // again.
+        //
+        // Adopting instead means a late reply simply loses to a newer turn,
+        // which is what barge-in is supposed to do, while the newest turn still
+        // reaches the speaker.
+        val turn = turns.current
         speaker?.flush()
         chunker.reset()
         synthesisDone = false
@@ -881,10 +897,16 @@ class S2SEngine @JvmOverloads constructor(
     }
 
     private fun speak(turn: Int, sentence: String) {
+        // Every spoken sentence routes through here, so this is the one place
+        // that can guarantee markup never reaches the synthesiser regardless of
+        // which model a host plugged in. See SpeakableText for what a real
+        // device did without it.
+        val spoken = SpeakableText.clean(sentence)
+        if (spoken.isBlank()) return
         ttsWorker.execute {
             if (turns.isStale(turn)) return@execute
             synthesizer.synthesize(
-                text = sentence,
+                text = spoken,
                 keepGoing = { turns.isCurrent(turn) && running },
             ) { chunk ->
                 if (turns.isStale(turn)) return@synthesize

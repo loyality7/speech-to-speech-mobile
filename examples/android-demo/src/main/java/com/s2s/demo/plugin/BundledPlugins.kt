@@ -46,13 +46,26 @@ object BundledPlugins {
     const val SQLITE_CONTEXT = "sqlite-context"
     const val CORE_TOOLS = "core-tools"
 
+    /**
+     * Everything here has to survive being SPOKEN, which is why the formatting
+     * rule is as explicit as the brevity one.
+     *
+     * A real device caught the gap: asked what it could do, the model answered
+     * with a markdown bullet list, and TTS read the syntax out loud — six
+     * "star star Providing information colon" lines, about 45 seconds of audio.
+     * The old prompt asked for short answers but never said "no markdown", and
+     * a remote model formats by default.
+     */
     const val DEFAULT_SYSTEM_PROMPT =
-        "You are Jarvis, a voice assistant. Keep answers short and " +
-            "conversational — one or two sentences unless the user asks " +
-            "for detail. When a registered tool can answer the request " +
-            "(for example, a calculation), call it instead of solving it " +
-            "yourself. Never explain your reasoning step by step unless " +
-            "asked to."
+        "You are Jarvis, a voice assistant. Everything you say is read aloud " +
+            "by a speech synthesiser, so write plain spoken sentences only: no " +
+            "markdown, no bullet points, no asterisks, no numbered lists, no " +
+            "headings. If you need to give several items, say them in one " +
+            "flowing sentence. Keep answers short and conversational — one or " +
+            "two sentences unless the user asks for detail. When a registered " +
+            "tool can answer the request (for example, a calculation), call it " +
+            "instead of solving it yourself. Never explain your reasoning step " +
+            "by step unless asked to."
 
     fun registerAll(manager: PluginManager, context: Context) {
         val app = context.applicationContext
