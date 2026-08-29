@@ -7,6 +7,11 @@ import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.skill.SkillRegistry
 import com.s2s.agent.skill.registerToolSkills
 import com.s2s.agent.task.InMemoryTaskStore
+import com.s2s.context.local.MemoryCandidate
+import com.s2s.context.local.MemoryDecision
+import com.s2s.context.local.MemoryProvenance
+import com.s2s.context.local.MemoryScope
+import com.s2s.context.local.SqliteContextEngine
 import com.s2s.demo.plugin.AndroidPluginDiscovery
 import com.s2s.demo.plugin.BoundServiceTools
 import com.s2s.demo.plugin.BoundServiceTextNormalizer
@@ -100,6 +105,40 @@ class JarvisRuntime(private val appContext: Context) {
         return result
     }
 
+    /**
+     * Runs [utterance] through [SqliteContextEngine.memoryWriter], if the
+     * selected context engine is the SQLite one. A no-op for any other
+     * [com.s2s.host.core.PluginType.CONTEXT_ENGINE] provider, and for every
+     * ordinary sentence — [com.s2s.context.local.MemoryWriter.consider]
+     * itself defaults to [MemoryDecision.Ignored] unless the text is an
+     * explicit request ("remember that…", "I prefer…") or a duplicate of
+     * something already stored, so this call is cheap and safe on every
+     * turn, not just the rare one that actually writes something.
+     *
+     * Never allowed to fail or slow down a turn: this runs after the
+     * response has already been queued for speech, and a memory-store
+     * exception must not read to the user as the assistant having failed to
+     * answer.
+     */
+    private fun considerForMemory(utterance: String) {
+        val store = sqliteMemoryStore ?: return
+        runCatching {
+            val decision = store.memoryWriter.consider(
+                MemoryCandidate(
+                    content = utterance,
+                    scope = MemoryScope.User,
+                    provenance = MemoryProvenance.USER,
+                ),
+            )
+            when (decision) {
+                is MemoryDecision.Stored -> Log.i(TAG, "memory stored: \"${decision.memory.content}\"")
+                is MemoryDecision.Updated -> Log.i(TAG, "memory updated: \"${decision.memory.content}\"")
+                is MemoryDecision.Duplicate -> Log.i(TAG, "memory already known: \"${decision.existing.content}\"")
+                is MemoryDecision.Ignored -> Log.i(TAG, "memory not stored: ${decision.reason}")
+            }
+        }.onFailure { Log.w(TAG, "memory consideration failed — turn already answered, continuing", it) }
+    }
+
     /** The selected normalizer plugin, or null if none is installed/enabled/selected. Never throws — normalization is optional. */
     private fun resolveNormalizer(): TextNormalizer? {
         val selected = registry.getSelected(PluginType.SPEECH_TEXT_NORMALIZER) ?: return null
@@ -130,6 +169,23 @@ class JarvisRuntime(private val appContext: Context) {
     var agentRuntime: AgentRuntime? = null
         private set
     private var contextEngine: ContextEngine? = null
+
+    /**
+     * [contextEngine] narrowed to its concrete type, when the SQLite-backed
+     * one is selected — so a settings UI can reach [SqliteContextEngine.identities]
+     * / `.memories` / `.memoryWriter`, which [ContextEngine] deliberately
+     * does not expose (see that interface's own doc: core has no opinion on
+     * memory management, only on what a turn's prompt looks like).
+     *
+     * Naming the concrete type here is the same exception [BundledPlugins]
+     * documents for itself and this class already takes for
+     * [BoundServiceTools]/[BoundServiceTextNormalizer]: something has to
+     * reach a capability the generic contract doesn't carry, and pretending
+     * otherwise would be a fiction. Null whenever a different
+     * [com.s2s.host.core.PluginType.CONTEXT_ENGINE] provider is selected —
+     * callers must not assume SQLite.
+     */
+    val sqliteMemoryStore: SqliteContextEngine? get() = contextEngine as? SqliteContextEngine
 
     /**
      * The selected transcript normalizer, if one is installed, enabled and
@@ -246,8 +302,28 @@ class JarvisRuntime(private val appContext: Context) {
                     if (runtime.cancelSession(sessionId)) {
                         Log.i(TAG, "barge-in: cancelled the in-flight turn for this utterance")
                     }
-                    runCatching { runtime.run(normalizeTranscript(text)) }
+                    val normalized = normalizeTranscript(text)
+                    runCatching { runtime.run(normalized) }
                         .onFailure { Log.w(TAG, "turn failed: ${it.message}", it) }
+
+                    // The gate every conversation-derived memory goes through
+                    // already exists (MemoryWriter) and was already exposed on
+                    // SqliteContextEngine — nothing here decides what is worth
+                    // remembering, that logic stays in s2s-context. This is
+                    // only the missing call site: after the turn has already
+                    // been spoken (S2SEngine.speakAssistantText() returns once
+                    // queued, not once played, so this adds no perceived
+                    // latency to the response), consider the user's own
+                    // utterance as a candidate.
+                    //
+                    // USER provenance + MemoryScope.User is deliberate: that
+                    // combination is the only one MemoryWriter will actually
+                    // store a DURABLE memory from without an explicit
+                    // importance override (see its provenance-boundary check),
+                    // and User scope is visible across every future session —
+                    // sessionId is randomly regenerated on every app start, so
+                    // Session-scoped memory would never survive a restart.
+                    considerForMemory(normalized)
                 }
             },
         )
