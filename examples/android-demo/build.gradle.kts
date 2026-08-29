@@ -88,11 +88,11 @@ dependencies {
     // to a one-off JitPack indexing race on first publish; 0.1.2 resolved
     // cleanly under the normal lowercase coordinate, confirming that was a
     // transient quirk, not a persistent property of this repo.
-    implementation("com.github.loyality7:s2s-host:0.3.0")
+    implementation("com.github.loyality7:s2s-host:0.3.1")
 
     // s2s-agent: AgentRuntime — owns the model/tool/context loop that
     // S2SEngine deliberately does not. The demo drives voice input through
     // this instead of S2SEngine's own single-shot generate() path (see
     // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.1.8")
+    implementation("com.github.loyality7:s2s-agent:0.1.9")
 }
