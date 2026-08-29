@@ -52,7 +52,7 @@ object BundledPlugins {
     // (PluginConfigField.Type.SECRET) same as any other secret this app
     // handles, and stays out of source and git history.
     const val OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-    const val OPENROUTER_DEFAULT_MODEL = "minimax/minimax-m3:free"
+    const val OPENROUTER_DEFAULT_MODEL = "openrouter/free"
 
     /**
      * Everything here has to survive being SPOKEN, which is why the formatting
