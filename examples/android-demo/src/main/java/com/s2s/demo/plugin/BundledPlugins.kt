@@ -47,6 +47,13 @@ object BundledPlugins {
     const val SQLITE_CONTEXT = "sqlite-context"
     const val CORE_TOOLS = "core-tools"
 
+    // Default remote endpoint — URL and model only, no key. The key is
+    // never hardcoded: it goes in the settings screen's API key field
+    // (PluginConfigField.Type.SECRET) same as any other secret this app
+    // handles, and stays out of source and git history.
+    private const val OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+    private const val OPENROUTER_DEFAULT_MODEL = "minimax/minimax-m3:free"
+
     /**
      * Everything here has to survive being SPOKEN, which is why the formatting
      * rule is as explicit as the brevity one.
@@ -120,26 +127,33 @@ object BundledPlugins {
                 availability = PluginAvailability.BUNDLED,
                 description = "Sends prompts to an OpenAI-compatible HTTP endpoint you host or subscribe to.",
                 configSchema = listOf(
-                    PluginConfigField("baseUrl", "Server URL", help = "e.g. https://my-server/v1"),
-                    PluginConfigField("apiKey", "API key", PluginConfigField.Type.SECRET, required = false),
+                    // Not required: OPENROUTER_DEFAULT_BASE_URL/MODEL fall in
+                    // when left blank (see the PluginProvider below).
+                    // baseUrl's field default is required=true, and
+                    // JarvisRuntime.start()'s pre-composition check rejects a
+                    // blank required field before the provider ever runs —
+                    // so this must stay required=false or the default below
+                    // is unreachable. apiKey has NO default: a real secret is
+                    // never hardcoded, only typed into this field.
+                    PluginConfigField("baseUrl", "Server URL", required = false, help = "e.g. https://my-server/v1 — leave blank to use OpenRouter."),
+                    PluginConfigField("apiKey", "API key", PluginConfigField.Type.SECRET, required = false, help = "Required for OpenRouter — get one at openrouter.ai/keys."),
                     PluginConfigField(
                         "model",
                         "Model name",
                         required = false,
-                        help = "As the server names it, e.g. gpt-4o-mini or qwen2.5-7b-instruct. Leave blank to use the server's default.",
+                        help = "As the server names it, e.g. gpt-4o-mini or qwen2.5-7b-instruct. Leave blank to use OpenRouter's free model.",
                     ),
                 ),
             ),
             PluginProvider<LanguageModel> { config ->
-                val baseUrl = config["baseUrl"] ?: error("remote plugin requires a 'baseUrl' config value")
                 RemoteLanguageModel(
                     RemoteLlmConfig(
-                        baseUrl = baseUrl,
-                        apiKey = config["apiKey"],
+                        baseUrl = config["baseUrl"]?.takeIf { it.isNotBlank() } ?: OPENROUTER_DEFAULT_BASE_URL,
+                        apiKey = config["apiKey"]?.takeIf { it.isNotBlank() },
                         // Was previously never passed, so the server always
                         // fell back to its own default model and the setting
                         // had no way to reach it.
-                        remoteModelName = config["model"]?.takeIf { it.isNotBlank() },
+                        remoteModelName = config["model"]?.takeIf { it.isNotBlank() } ?: OPENROUTER_DEFAULT_MODEL,
                     ),
                 )
             },
