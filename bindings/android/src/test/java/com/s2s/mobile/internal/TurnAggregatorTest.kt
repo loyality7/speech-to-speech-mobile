@@ -78,6 +78,40 @@ class TurnAggregatorTest {
     }
 
     @Test
+    fun `default config holds a real device's measured segment gaps together`() {
+        // Regression for the bug that shipped: baseDelayMs was 500ms, but a
+        // segment does not arrive when the user stops — it arrives after
+        // VadConfig.minSilenceSeconds (350ms) PLUS decode (237-620ms
+        // measured). So the window had already expired on arrival and every
+        // segment committed instantly; the aggregator did nothing.
+        //
+        // The earlier tests missed it because they advance a fake clock only
+        // when told to, modelling no decode latency at all. This one replays
+        // the real inter-segment gaps recorded on device for ONE sentence
+        // spoken with natural thinking pauses, using DEFAULT config.
+        val a = TurnAggregator(TurnConfig()) { clock }
+
+        a.offer("Set a reminder")
+        advance(1_135) // real gap, device-measured
+        assertNull("a 1.1s thinking pause must not end the turn", a.commitIfDue())
+
+        a.offer("for tomorrow morning")
+        advance(1_135)
+        assertNull("nor the second one", a.commitIfDue())
+
+        a.offer("to call the dentist")
+
+        // Now the user genuinely stops. The window must still fire.
+        advance(3_000)
+        val committed = a.commitIfDue()
+        assertNotNull("a real stop must still commit", committed)
+        assertEquals(
+            "Set a reminder for tomorrow morning to call the dentist",
+            committed!!.transcript,
+        )
+    }
+
+    @Test
     fun `commit happens exactly once — a second call returns null`() {
         // Idempotence by construction: the engine dispatches its single
         // request on a non-null return, so a second non-null would be a

@@ -23,25 +23,45 @@ package com.s2s.mobile.config
  */
 data class TurnConfig(
     /**
-     * Baseline wait after the user stops before the turn commits, in ms.
+     * Baseline wait after a segment LANDS before the turn commits, in ms.
      *
-     * Measured from when a segment lands — which already implies
-     * [VadConfig.minSilenceSeconds] of silence has passed — so the true
-     * silence before a commit is this plus that, ~850 ms at defaults.
+     * Sizing this needs care, because a segment does not arrive when the user
+     * stops speaking — it arrives considerably later. Measured on a real
+     * device, per segment:
      *
-     * Studies of conversational turn-taking put comfortable inter-speaker gaps
-     * in the 200–500 ms range, but a voice assistant that cuts a thinking user
-     * off is far more annoying than one that waits an extra beat, so this errs
-     * long deliberately. Lower it for a snappier, more interrupt-prone feel.
+     * ```
+     * user stops → VadConfig.minSilenceSeconds (350ms) → decode (237–620ms)
+     *            → segment offered to the aggregator
+     * ```
+     *
+     * So ~600–1000 ms of wall clock is already gone before this delay even
+     * starts counting. The first version of this value was 500 ms, which had
+     * already expired by the time the next frame ran `commitIfDue()` — every
+     * segment committed instantly and the aggregator did nothing at all. The
+     * unit tests missed it because a fake clock advances only when told to and
+     * therefore models no decode latency.
+     *
+     * Real inter-segment gaps for one sentence spoken with natural thinking
+     * pauses, same device: **1135 ms and 1838 ms**. This must comfortably
+     * exceed the first of those to hold such a sentence together, while
+     * staying short enough that a genuinely finished turn is not left hanging.
+     * 1400 ms sits above the observed short gap and below the long one, so a
+     * brief hesitation merges and a real stop still commits promptly.
+     *
+     * The user-perceived wait is this value MINUS the decode time that already
+     * elapsed, so it feels shorter than it reads.
      */
-    val baseDelayMs: Long = 500,
+    val baseDelayMs: Long = 1_400,
 
     /**
      * Extra wait when the transcript ends on a word that cannot end a clause —
      * "and", "to", "um", "the". Someone who stopped there is thinking, not
      * finished, so the strongest available signal says keep waiting.
+     *
+     * Sized against the same real-device measurement as [baseDelayMs]: the
+     * long observed thinking gap was 1838 ms, so base + this must clear it.
      */
-    val incompleteGraceMs: Long = 700,
+    val incompleteGraceMs: Long = 900,
 
     /**
      * How many times [incompleteGraceMs] may extend one turn.
@@ -60,7 +80,7 @@ data class TurnConfig(
      * this delay — an acceptable trade against fragmenting every sentence
      * whose first pause lands after two words.
      */
-    val shortUtteranceGraceMs: Long = 400,
+    val shortUtteranceGraceMs: Long = 600,
 
     /** Word count at or below which [shortUtteranceGraceMs] applies. */
     val shortUtteranceWords: Int = 3,
@@ -73,7 +93,7 @@ data class TurnConfig(
      * it and respond faster. Recognisers that emit no punctuation never reach
      * this path, so it is safe to leave enabled.
      */
-    val completeUtteranceDelayMs: Long = 250,
+    val completeUtteranceDelayMs: Long = 700,
 
     /** Whether to trust terminal punctuation as an end-of-turn signal at all. Disable for a recogniser whose punctuation is unreliable. */
     val trustTerminalPunctuation: Boolean = true,

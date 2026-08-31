@@ -55,6 +55,30 @@ kotlin {
     jvmToolchain(17)
 }
 
+/**
+ * Make the LOCAL engine source win over the published artifact.
+ *
+ * s2s-agent and s2s-host depend on `com.github.loyality7:speech-to-speech-mobile`
+ * (the published AAR), while this app depends on `project(":bindings:android")`
+ * — the same classes, from two sources, both on the runtime classpath. The
+ * published copy was winning, which meant **every local edit to S2SEngine was
+ * dead code on the device**: a turn-aggregation fix was verified by unit tests,
+ * installed, and had no effect at all, because the APK ran the published 1.0.8
+ * S2SEngine instead. The only visible symptom was "the fix does nothing", with
+ * no error to explain it.
+ *
+ * Substituting the module for the project means there is exactly one copy of
+ * these classes, and it is the one in this repo. Also removes the resource
+ * duplication the `packaging` block above works around.
+ */
+configurations.all {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("com.github.loyality7:speech-to-speech-mobile"))
+            .using(project(":bindings:android"))
+            .because("local engine source must not be shadowed by the published AAR")
+    }
+}
+
 dependencies {
     implementation(project(":bindings:android"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
