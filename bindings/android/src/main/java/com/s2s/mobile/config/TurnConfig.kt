@@ -50,8 +50,15 @@ data class TurnConfig(
      *
      * The user-perceived wait is this value MINUS the decode time that already
      * elapsed, so it feels shorter than it reads.
+     *
+     * Raised to 2500 after the app's own user reported speaking slowly and in
+     * long stretches with many pauses. That is the case this whole class
+     * exists for, and the cost is asymmetric: waiting too long adds a beat
+     * before the reply, while committing too early splits one thought into
+     * two messages AND two model requests, which is both wrong and expensive.
+     * Tune down only if a faster speaker finds the wait irritating.
      */
-    val baseDelayMs: Long = 1_400,
+    val baseDelayMs: Long = 2_500,
 
     /**
      * Extra wait when the transcript ends on a word that cannot end a clause —
@@ -60,8 +67,10 @@ data class TurnConfig(
      *
      * Sized against the same real-device measurement as [baseDelayMs]: the
      * long observed thinking gap was 1838 ms, so base + this must clear it.
+     * With base at 2500 this allows a ~4s hunt for the next word, which is
+     * realistic for someone mid-thought who has just said "and…".
      */
-    val incompleteGraceMs: Long = 900,
+    val incompleteGraceMs: Long = 1_500,
 
     /**
      * How many times [incompleteGraceMs] may extend one turn.
@@ -107,8 +116,14 @@ data class TurnConfig(
      * replied to, which is a worse failure than committing mid-sentence.
      * Should stay comfortably under [VadConfig.maxSpeechSeconds] × a few
      * segments' worth of speech.
+     *
+     * 90s, not 30s: a slow speaker delivering a long thought across many
+     * pauses can legitimately hold the floor for a minute, and cutting them
+     * off mid-thought is the exact failure this class was built to prevent.
+     * This is a safety net against never answering at all, not a turn-length
+     * policy.
      */
-    val maxTurnDurationMs: Long = 30_000,
+    val maxTurnDurationMs: Long = 90_000,
 
     /**
      * What to do when the user starts a new turn while the assistant is still
