@@ -52,7 +52,30 @@ object BundledPlugins {
     // (PluginConfigField.Type.SECRET) same as any other secret this app
     // handles, and stays out of source and git history.
     const val OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-    const val OPENROUTER_DEFAULT_MODEL = "openrouter/free"
+    /**
+     * A specific instruction-tuned model, NOT the `openrouter/free`
+     * auto-router.
+     *
+     * The router chose `minimax/minimax-m3:free`, a reasoning model that
+     * writes its thinking into the message `content` rather than the separate
+     * `reasoning` field. On a real device that meant the assistant read its
+     * whole deliberation aloud — including reciting this file's own system
+     * prompt back ("Never explain reasoning step by step…", "Short,
+     * conversational, 1-2 sentences max") — and took 9-22s to first audio,
+     * because those tokens are generated before any answer.
+     *
+     * OpenRouter's `{"reasoning": {"exclude": true}}` (sent by
+     * RemoteLlmConfig.excludeReasoning) does not help there: it governs the
+     * structured reasoning field, not thinking inlined into content. And
+     * filtering content by prose pattern is guesswork that breaks on the next
+     * model. Choosing a non-reasoning model removes the problem at the root
+     * instead — the tokens are never generated, so there is no latency to pay
+     * and nothing to strip.
+     *
+     * Verified present in OpenRouter's live free-tier model list. Any model
+     * the user sets in settings overrides this.
+     */
+    const val OPENROUTER_DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 
     /**
      * Everything here has to survive being SPOKEN, which is why the formatting
