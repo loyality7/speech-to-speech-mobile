@@ -192,6 +192,32 @@ class TurnAggregatorTest {
     }
 
     @Test
+    fun `by default a punctuated segment does NOT commit early`() {
+        // The device bug this fixes: Moonshine punctuates every SEGMENT, since
+        // each segment is a grammatical unit — "I want to set a reminder."
+        // ends with a period because the clause ended, not because the speaker
+        // finished. Trusting that shortened the window to ~700ms, so the
+        // continuation arriving ~540ms later became a SECOND message and a
+        // SECOND model request. Measured: commits at 792ms instead of 2500ms.
+        val a = TurnAggregator(TurnConfig()) { clock }
+        a.offer("I want to set a reminder.")
+
+        advance(1_000)
+        assertNull("punctuation must not shorten the window by default", a.commitIfDue())
+
+        // The continuation lands well inside the real window and merges.
+        a.offer("for tomorrow morning.")
+        advance(1_000)
+        assertNull(a.commitIfDue())
+
+        advance(2_000)
+        assertEquals(
+            "I want to set a reminder. for tomorrow morning.",
+            a.commitIfDue()?.transcript,
+        )
+    }
+
+    @Test
     fun `terminal punctuation commits faster than the base delay`() {
         val a = aggregator(config(baseDelayMs = 500, completeUtteranceDelayMs = 250))
         a.offer("What is the capital of France?")

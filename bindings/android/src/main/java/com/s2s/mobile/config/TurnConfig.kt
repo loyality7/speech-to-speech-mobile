@@ -97,15 +97,32 @@ data class TurnConfig(
     /**
      * Wait used when the transcript ends in terminal punctuation, in ms.
      *
-     * A recogniser that emits "?" or "." has already judged the sentence
-     * complete, which is better evidence than any timing heuristic — so trust
-     * it and respond faster. Recognisers that emit no punctuation never reach
-     * this path, so it is safe to leave enabled.
+     * Only consulted when [trustTerminalPunctuation] is on, which it is not
+     * by default — see that flag for why.
      */
     val completeUtteranceDelayMs: Long = 700,
 
-    /** Whether to trust terminal punctuation as an end-of-turn signal at all. Disable for a recogniser whose punctuation is unreliable. */
-    val trustTerminalPunctuation: Boolean = true,
+    /**
+     * Whether terminal punctuation counts as evidence the TURN is finished.
+     *
+     * OFF by default, and the reason is a measured device failure. The idea
+     * was that a recogniser emitting "." or "?" has already judged the
+     * sentence complete, so the wait could be shortened to
+     * [completeUtteranceDelayMs]. That is false for a segment-based
+     * recogniser: Moonshine punctuates every SEGMENT, because each segment is
+     * a grammatical unit — it wrote "I want to set a reminder." because that
+     * clause ended, not because the speaker had finished.
+     *
+     * The result on device was exactly the bug this class exists to prevent:
+     * segments committed after ~790 ms instead of [baseDelayMs], the user's
+     * continuation arrived ~540 ms later, and one thought became two messages
+     * and two model requests. Punctuation carries no turn-level information
+     * here, so it must not shorten the window.
+     *
+     * A host whose recogniser punctuates only at true utterance end (some
+     * streaming models with their own endpointer) can turn this back on.
+     */
+    val trustTerminalPunctuation: Boolean = false,
 
     /**
      * Hard ceiling on one turn's accumulation, in ms.
