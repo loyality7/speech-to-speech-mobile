@@ -7,7 +7,9 @@ import com.s2s.mobile.audio.MicrophoneInput
 import com.s2s.mobile.audio.SpeakerOutput
 import com.s2s.mobile.audio.VoiceSessionService
 import com.s2s.mobile.config.S2SConfig
+import com.s2s.mobile.config.ThinkingInterruptionPolicy
 import com.s2s.mobile.internal.BargeInGate
+import com.s2s.mobile.internal.TurnAggregator
 import com.s2s.mobile.internal.TurnGuard
 import com.s2s.mobile.pipeline.AudioInput
 import com.s2s.mobile.pipeline.AudioOutput
@@ -143,6 +145,13 @@ class S2SEngine @JvmOverloads constructor(
 
     private val turns = TurnGuard()
     private val bargeInGate = BargeInGate(config.vad.bargeInFrames, config.vad.bargeInGraceMs)
+
+    /**
+     * Turns acoustic segments into conversational turns. Every recognised
+     * segment goes through this; nothing else may dispatch a turn. See
+     * [TurnAggregator] for why a segment boundary is not a turn boundary.
+     */
+    private val aggregator = TurnAggregator(config.turn)
 
     /**
      * Same debounce as [bargeInGate] (requiredFrames, no grace needed — nothing
@@ -382,6 +391,7 @@ class S2SEngine @JvmOverloads constructor(
         if (!running) return
         running = false
         turns.begin()
+        aggregator.abandon()
         languageModel.cancel()
         microphone.stop()
         speaker?.flush()
@@ -521,6 +531,10 @@ class S2SEngine @JvmOverloads constructor(
     fun interrupt() {
         turns.begin()
         pendingUserText = null
+        // Whatever was accumulating is abandoned with the turn it belonged to.
+        // Keeping it would mean the next thing the user says gets prefixed
+        // with words from a turn they already cut off.
+        aggregator.abandon()
         languageModel.cancel()
 
         // Record what was actually said before the cut. The user heard it, so the
@@ -593,8 +607,20 @@ class S2SEngine @JvmOverloads constructor(
             speechActivityGate.reset()
         }
 
+        // Before the state dispatch, and unconditionally: a turn that finished
+        // accumulating must commit even if the state has since moved on (the
+        // user's next turn can land while the assistant is still THINKING
+        // about the previous one). Costs one comparison per frame when no turn
+        // is pending.
+        tickTurnCommit()
+
         when (_state.value) {
-            S2SState.LISTENING -> {
+            // All three "the user may be talking to us" states share one
+            // handler: a segment landing means the same thing whether the turn
+            // just started, is mid-pause, or arrived while the assistant was
+            // still thinking about the previous turn. Only the aggregator
+            // decides what it means for the turn as a whole.
+            S2SState.LISTENING, S2SState.USER_TURN_ACTIVE, S2SState.TURN_PENDING_CONFIRMATION -> {
                 // Feeding the VAD here too (not just during SPEAKING for
                 // barge-in) is what makes SpeechStarted possible, and keeps its
                 // internal state warm rather than cold-starting each time
@@ -605,32 +631,17 @@ class S2SEngine @JvmOverloads constructor(
                     speechActive = true
                     emit(S2SEvent.SpeechStarted)
                 }
-                when (val heard = recognizer.accept(frame)) {
-                    is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
-                    is Transcript.Final -> {
-                        speechActivityGate.reset()
-                        if (speechActive) {
-                            speechActive = false
-                            emit(S2SEvent.SpeechEnded)
-                        }
-                        val text = normalizeForModel(heard.text)
-                        emit(S2SEvent.UserTranscript(text, isFinal = true))
-                        beginTurn(text)
-                    }
-                    Transcript.Nothing -> Unit
-                }
+                onUserAudio(recognizer.accept(frame))
             }
 
-            // Nothing is playing yet, so there is nothing to barge into. Keep
-            // listening: a user who pauses mid-thought and carries on is
-            // continuing the same question, not starting a new one. Treating
-            // that as an interruption threw the first half away and answered
-            // only the fragment after the pause.
-            S2SState.THINKING -> when (val heard = recognizer.accept(frame)) {
-                is Transcript.Final -> continueTurn(normalizeForModel(heard.text))
-                is Transcript.Partial -> emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
-                Transcript.Nothing -> Unit
-            }
+            // Nothing is playing yet, so there is nothing to barge into, but a
+            // segment arriving here is the start of a NEW turn — the previous
+            // one has already committed and been dispatched. It accumulates in
+            // the aggregator exactly like any other turn and only supersedes
+            // the in-flight response once it actually commits (see
+            // ThinkingInterruptionPolicy): a finished sentence is the evidence,
+            // never a single frame of audio.
+            S2SState.THINKING -> onUserAudio(recognizer.accept(frame))
 
             // Audio is playing: the recogniser stays idle so leaked assistant
             // audio can never be transcribed back as if the user had said it.
@@ -674,6 +685,109 @@ class S2SEngine @JvmOverloads constructor(
 
     // ── Turn ────────────────────────────────────────────────────────────
 
+    /**
+     * The single entry point for everything the recogniser produces.
+     *
+     * A [Transcript.Final] is an **acoustic segment**, not a finished turn — it
+     * means the VAD saw [com.s2s.mobile.config.VadConfig.minSilenceSeconds] of
+     * silence, which a thinking pause satisfies just as well as the end of a
+     * sentence. So a segment only ever accumulates here; committing is
+     * [TurnAggregator]'s decision, taken later in [tickTurnCommit].
+     *
+     * This is the fix for one thought becoming several messages and several
+     * requests: before it existed, every segment called the turn handler
+     * directly, so *"Set a reminder … for tomorrow … to call the dentist"*
+     * dispatched three requests and left two of them cancelled mid-flight.
+     *
+     * A [Transcript.Partial] (streaming recognisers only; the default offline
+     * one never emits them) is displayed but never accumulated — partials are
+     * superseded by the segment's own final text, so appending both would
+     * duplicate every word.
+     */
+    private fun onUserAudio(heard: Transcript) {
+        when (heard) {
+            is Transcript.Partial -> {
+                // A partial means the user is audibly mid-word RIGHT NOW, so
+                // no endpoint window should be running. Streaming recognisers
+                // only; the default offline one never emits these, which is
+                // why USER_TURN_ACTIVE is unreachable on that path and a turn
+                // goes straight to TURN_PENDING_CONFIRMATION.
+                if (aggregator.hasActiveTurn) setState(S2SState.USER_TURN_ACTIVE)
+                emit(S2SEvent.UserTranscript(heard.text, isFinal = false))
+            }
+
+            is Transcript.Final -> {
+                speechActivityGate.reset()
+                if (speechActive) {
+                    speechActive = false
+                    emit(S2SEvent.SpeechEnded)
+                }
+                val snapshot = aggregator.offer(normalizeForModel(heard.text)) ?: return
+                // Non-final by construction: the UI updates ONE evolving
+                // message rather than committing a fragment. Note this is
+                // segment-granular, not word-by-word — the offline recogniser
+                // produces no partials, so nothing appears until the user
+                // pauses. Live incremental text needs a streaming recogniser.
+                emit(S2SEvent.UserTranscript(snapshot.transcript, isFinal = false))
+                setState(S2SState.TURN_PENDING_CONFIRMATION)
+            }
+
+            Transcript.Nothing -> Unit
+        }
+    }
+
+    /**
+     * Commits the active turn once its endpoint window has elapsed. Called
+     * once per audio frame, so the resolution is one frame (32 ms) — far finer
+     * than any delay in [com.s2s.mobile.config.TurnConfig].
+     *
+     * [TurnAggregator.commitIfDue] returns non-null exactly once per turn, so
+     * the commit is idempotent without this method having to track anything.
+     */
+    private fun tickTurnCommit() {
+        val committed = aggregator.commitIfDue() ?: return
+
+        // A turn committing while the assistant is still working on the
+        // PREVIOUS one is the "actually, never mind — different question"
+        // case. What makes cancelling safe here is that this is a committed
+        // turn: the aggregator already waited out the endpoint window, so the
+        // evidence is a finished sentence, never a stray frame of audio.
+        //
+        // The turn counter bump in beginTurn() invalidates the in-flight
+        // generation, synthesis and playback together; interrupt() would also
+        // reset recognition and flush the speaker, which is wrong here because
+        // nothing is playing yet during THINKING.
+        val supersedes = _state.value == S2SState.THINKING
+        if (supersedes) {
+            when (config.turn.thinkingInterruptionPolicy) {
+                ThinkingInterruptionPolicy.CANCEL_AND_REPLACE -> {
+                    languageModel.cancel()
+                    // Leaves history consistent: the superseded turn's user
+                    // message would otherwise sit there unanswered and the
+                    // next turn would stack a second user message on it.
+                    commitOrDropPendingTurn()
+                }
+                ThinkingInterruptionPolicy.QUEUE_AFTER_CURRENT -> {
+                    // Deliberately not implemented as a queue: holding the
+                    // text while an unbounded generation finishes needs a
+                    // real queue with its own ordering and eviction rules,
+                    // and no host has asked for it. Falling through to
+                    // dispatch (same as CANCEL_AND_REPLACE minus the cancel)
+                    // would silently overlap two generations — the exact bug
+                    // this whole change exists to remove — so refuse instead.
+                    Log.w(TAG, "QUEUE_AFTER_CURRENT is not implemented; dropping the superseding turn")
+                    return
+                }
+            }
+        }
+
+        // The one place a user message becomes permanent and a request is
+        // dispatched. Emitting isFinal=true here (and only here) is what lets
+        // the UI turn its evolving line into the committed message.
+        emit(S2SEvent.UserTranscript(committed.transcript, isFinal = true))
+        beginTurn(committed.transcript)
+    }
+
     private fun beginTurn(userText: String, overrides: GenerationOverrides? = null) {
         pendingUserText = userText
         val handler = externalTurnHandler
@@ -694,56 +808,6 @@ class S2SEngine @JvmOverloads constructor(
         }
         history.addUser(userText)
         startGeneration(overrides)
-    }
-
-    /**
-     * The user paused, we started answering, and now they have carried on.
-     *
-     * Their earlier words are kept and the turn is restarted with everything
-     * they have said. Discarding the first half — which is what treating this as
-     * an interruption did — answered only the fragment after the pause.
-     *
-     * Real defect this fixes: this used to call [startGeneration] unconditionally
-     * — the internal, non-agent generation path — even when [externalTurnHandler]
-     * was set. [beginTurn] hands a turn to the external handler and returns
-     * immediately (the handler dispatches async); while that generation is still
-     * in flight, THINKING state routes a second utterance here, and this then
-     * fired a SECOND, completely independent call into the same [languageModel]
-     * instance the external handler (an agent harness) was still using — with no
-     * shared WIP tracking, no shared cancellation, nothing. On a real device this
-     * produced two overlapping HTTP calls into the same [LanguageModel], and
-     * whichever one's cancellation the harness owned never reached this one:
-     * both died silently, no reply, no TTS, for every utterance after.
-     *
-     * An external handler must own EVERY turn once one is in play, the same way
-     * [beginTurn] already treats it as the sole authority — not just the first
-     * utterance of it.
-     */
-    private fun continueTurn(moreText: String) {
-        val merged = listOfNotNull(pendingUserText, moreText)
-            .joinToString(" ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        if (merged.isEmpty()) return
-
-        pendingUserText = merged
-        emit(S2SEvent.UserTranscript(merged, isFinal = true))
-
-        val handler = externalTurnHandler
-        if (handler != null) {
-            // Same contract as beginTurn(): the handler owns everything from
-            // here — recording the turn, generating, deciding what the result
-            // means, eventually calling speakAssistantText(). Do NOT also
-            // touch history or call startGeneration(); this turn is already
-            // owned by whatever the first utterance handed it to.
-            externalTurnStartedAt = System.currentTimeMillis()
-            handler(merged)
-            return
-        }
-
-        // Replace rather than append, or the model sees the half-question twice.
-        history.replaceLastUser(merged)
-        startGeneration()
     }
 
     /**

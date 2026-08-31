@@ -10,6 +10,8 @@ data class S2SConfig(
     val models: ModelPaths,
     val audio: AudioConfig = AudioConfig(),
     val vad: VadConfig = VadConfig(),
+    /** When a user's conversational turn is considered finished — distinct from [VadConfig]'s acoustic segmentation. See [TurnConfig]. */
+    val turn: TurnConfig = TurnConfig(),
     val stt: SttConfig = SttConfig(),
     val tts: TtsConfig = TtsConfig(),
     /**

@@ -775,6 +775,17 @@ class MainActivity : Activity() {
         scope.launch {
             engine.events.collect { event ->
                 when (event) {
+                    // ONE evolving message per turn. Every non-final update
+                    // overwrites the same "You:" line in place; the single
+                    // final one commits it. The engine guarantees exactly one
+                    // isFinal=true per conversational turn (see
+                    // TurnAggregator) — it used to send one per acoustic
+                    // segment, which is why a sentence with two thinking
+                    // pauses used to appear as three separate messages.
+                    //
+                    // Updates arrive per closed VAD segment, not per word:
+                    // the default offline recogniser emits no partials, so
+                    // continuous speech shows nothing until the first pause.
                     is S2SEvent.UserTranscript ->
                         if (event.isFinal) {
                             replacePartial("You: ${event.text}\n")

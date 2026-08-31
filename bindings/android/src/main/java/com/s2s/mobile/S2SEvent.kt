@@ -8,6 +8,21 @@ enum class S2SState {
     /** Microphone open, waiting for the user. */
     LISTENING,
 
+    /**
+     * The user is mid-turn: at least one acoustic segment has been recognised
+     * and the turn is still accumulating. No request has been dispatched and
+     * none may be — see [com.s2s.mobile.internal.TurnAggregator] for why a
+     * segment boundary is not a turn boundary.
+     */
+    USER_TURN_ACTIVE,
+
+    /**
+     * The user has paused and the adaptive endpoint window is running. More
+     * speech returns to [USER_TURN_ACTIVE] and cancels the pending commit;
+     * the window elapsing commits the turn and moves to [THINKING].
+     */
+    TURN_PENDING_CONFIRMATION,
+
     /** User finished; the model is producing tokens. */
     THINKING,
 
