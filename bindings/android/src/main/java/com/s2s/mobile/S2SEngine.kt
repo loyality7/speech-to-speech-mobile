@@ -870,7 +870,14 @@ class S2SEngine @JvmOverloads constructor(
         // onComplete does for the non-agent path — queuing here directly
         // rather than wrapping in another ttsWorker.execute keeps the two
         // paths' threading identical.
-        chunker.accept(text).forEach { speak(turn, it) }
+        // Reasoning is stripped from the WHOLE reply here, before chunking —
+        // SpeakableText.clean() in speak() only ever sees one sentence, by
+        // which point a <think> block's opening and closing tags are in
+        // different chunks. A real device read a reasoning model's entire
+        // chain of thought aloud (~45s, including reciting the system prompt's
+        // own rules back) because nothing did this.
+        val speakable = SpeakableText.stripReasoning(text)
+        chunker.accept(speakable).forEach { speak(turn, it) }
         chunker.flush()?.let { speak(turn, it) }
         markSynthesisDone(turn)
     }
