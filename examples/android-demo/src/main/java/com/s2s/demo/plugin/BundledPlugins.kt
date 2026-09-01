@@ -1,7 +1,9 @@
 package com.s2s.demo.plugin
 
 import android.content.Context
+import android.util.Log
 import com.s2s.context.local.SqliteContextEngine
+import com.s2s.host.core.ContextAwareToolsProvider
 import com.s2s.host.core.PluginAvailability
 import com.s2s.host.core.PluginConfigField
 import com.s2s.host.core.PluginDescriptor
@@ -17,6 +19,7 @@ import com.s2s.mobile.pipeline.ContextEngine
 import com.s2s.mobile.pipeline.LanguageModel
 import com.s2s.mobile.pipeline.Tools
 import com.s2s.tools.core.CalculatorTool
+import com.s2s.tools.core.IdentityTools
 import com.s2s.tools.core.MemoryTools
 import com.s2s.tools.core.ToolRegistry
 import java.util.UUID
@@ -46,6 +49,8 @@ object BundledPlugins {
     const val REMOTE_LLM = "remote"
     const val SQLITE_CONTEXT = "sqlite-context"
     const val CORE_TOOLS = "core-tools"
+
+    private const val TAG = "BundledPlugins"
 
     // Default remote endpoint — URL and model only, no key. The key is
     // never hardcoded: it goes in the settings screen's API key field
@@ -87,8 +92,23 @@ object BundledPlugins {
      * The old prompt asked for short answers but never said "no markdown", and
      * a remote model formats by default.
      */
+    /**
+     * No assistant NAME here, deliberately.
+     *
+     * This used to open "You are Jarvis". That hardcoded a persona into the
+     * stable prompt prefix, where the user could not change it — and it
+     * actively fought the identity layer: `AgentIdentity.displayName` is
+     * prepended by `WorkingContextBuilder` as "You are <name>." whenever one
+     * is stored, so a renamed assistant received both names in one prompt and
+     * had to guess. The name belongs in the store the `set_identity` tool
+     * writes, which is per-user and survives a restart.
+     *
+     * Everything that remains here is true of the assistant regardless of what
+     * it is called: it speaks aloud, so it must not emit markup, and it should
+     * be brief.
+     */
     const val DEFAULT_SYSTEM_PROMPT =
-        "You are Jarvis, a voice assistant. Everything you say is read aloud " +
+        "You are a voice assistant. Everything you say is read aloud " +
             "by a speech synthesiser, so write plain spoken sentences only: no " +
             "markdown, no bullet points, no asterisks, no numbered lists, no " +
             "headings. If you need to give several items, say them in one " +
@@ -106,18 +126,22 @@ object BundledPlugins {
      * using, which does not exist yet at plugin-registration time (this
      * runs once at [com.s2s.demo.JarvisRuntime] construction; a fresh
      * `SqliteContextEngine` is built on every [com.s2s.demo.JarvisRuntime.start]).
-     * [com.s2s.demo.JarvisRuntime.considerForMemory]/`recallFromMemory`
-     * resolve that engine lazily at call time, so passing them as bound
-     * method references here is enough — no need for the composition-time
-     * [com.s2s.host.core.ContextAwareToolsProvider] seam, which exists for a
-     * plugin that isn't `JarvisRuntime` itself and has no other way to reach
-     * the resolved `ContextEngine`.
+     * They now take the engine as a PARAMETER rather than resolving it
+     * themselves, because the composition-time
+     * [com.s2s.host.core.ContextAwareToolsProvider] seam supplies the live
+     * instance. The earlier version had them read `JarvisRuntime`'s own field,
+     * which is assigned only after `HostComposer.resolve()` returns — later
+     * than the tools are built — and is cleared on `stop()`. It happened to
+     * work because a tool runs during a turn; it broke on a restart race. See
+     * the provider registration below.
      */
     fun registerAll(
         manager: PluginManager,
         context: Context,
-        considerMemory: (String) -> String,
-        recallMemory: (String) -> String,
+        considerMemory: (SqliteContextEngine, String) -> String,
+        recallMemory: (SqliteContextEngine, String) -> String,
+        updateIdentity: (SqliteContextEngine, String?, String?, String?) -> String,
+        updateProfile: (SqliteContextEngine, String?, String?, String?) -> String,
     ) {
         val app = context.applicationContext
 
@@ -204,15 +228,63 @@ object BundledPlugins {
                 pluginId = CORE_TOOLS,
                 type = PluginType.TOOLS,
                 displayName = "Core Tools",
-                version = "0.1.0",
+                version = "0.2.0",
                 source = PluginSource.BUNDLED,
                 availability = PluginAvailability.BUNDLED,
-                description = "Built-in tools: a calculator, and remember/recall for durable memory.",
+                description = "Built-in tools: a calculator, remember/recall for durable memory, " +
+                    "and set_identity/set_user_profile so the assistant's persona and what it knows " +
+                    "about the user survive a restart.",
             ),
-            PluginProvider<Tools> {
-                ToolRegistry().also {
-                    CalculatorTool.registerOn(it)
-                    MemoryTools(considerMemory, recallMemory).registerOn(it)
+            // ContextAwareToolsProvider, not a plain PluginProvider, and the
+            // difference is correctness rather than style.
+            //
+            // The memory and identity tools need the ContextEngine that THIS
+            // composition produced. The previous version closed over
+            // JarvisRuntime's own `contextEngine` field, which HostComposer
+            // assigns only after resolve() returns — so the tools were built
+            // (line order: resolve, then AgentRuntime, then the field
+            // assignment) before the field they read was set. It worked only
+            // because a tool is invoked later, during a turn. On a
+            // stop()/start() cycle the field is cleared first, so a tool call
+            // racing a restart read null and reported "memory is not
+            // available".
+            //
+            // This seam exists precisely to close that gap: HostComposer
+            // resolves Tools after ContextEngine and hands the live instance
+            // in, so the binding is by construction instead of by timing.
+            ContextAwareToolsProvider { _, contextEngine ->
+                ToolRegistry().also { registry ->
+                    CalculatorTool.registerOn(registry)
+                    // Only the SQLite engine carries memory/identity — the
+                    // generic ContextEngine contract deliberately does not
+                    // (see its own doc). A different provider means these
+                    // tools are simply not registered, so the model is never
+                    // shown a tool that cannot work.
+                    val sqlite = contextEngine as? SqliteContextEngine
+                    if (sqlite == null) {
+                        Log.i(
+                            TAG,
+                            "context provider is not SQLite — memory and identity tools not registered",
+                        )
+                    } else {
+                        MemoryTools(
+                            considerMemory = { content -> considerMemory(sqlite, content) },
+                            recallMemory = { query -> recallMemory(sqlite, query) },
+                        ).registerOn(registry)
+                        // The identity WRITE path. Without these, AgentIdentity
+                        // and UserProfile were read on every turn and never
+                        // written, so loadIdentity() always returned null and
+                        // the persona fragment was filtered out of the prompt —
+                        // every session started as a stranger.
+                        IdentityTools(
+                            updateIdentity = { name, instructions, language ->
+                                updateIdentity(sqlite, name, instructions, language)
+                            },
+                            updateProfile = { name, style, language ->
+                                updateProfile(sqlite, name, style, language)
+                            },
+                        ).registerOn(registry)
+                    }
                 }
             },
         )

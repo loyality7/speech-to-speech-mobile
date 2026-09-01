@@ -6,12 +6,17 @@ import com.s2s.agent.agent.AgentEvent
 import com.s2s.agent.agent.AgentRuntime
 import com.s2s.agent.skill.SkillRegistry
 import com.s2s.agent.skill.registerToolSkills
-import com.s2s.agent.task.InMemoryTaskStore
+import com.s2s.agent.policy.ConfirmationDecision
+import com.s2s.agent.policy.ConfirmationPolicy
+import com.s2s.agent.policy.ExecutionBudget
+import com.s2s.agent.task.FileTaskStore
+import com.s2s.context.local.AgentIdentity
 import com.s2s.context.local.MemoryCandidate
 import com.s2s.context.local.MemoryDecision
 import com.s2s.context.local.MemoryProvenance
 import com.s2s.context.local.MemoryScope
 import com.s2s.context.local.SqliteContextEngine
+import com.s2s.context.local.UserProfile
 import com.s2s.demo.plugin.AndroidPluginDiscovery
 import com.s2s.demo.plugin.BoundServiceTools
 import com.s2s.demo.plugin.BoundServiceTextNormalizer
@@ -40,6 +45,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -121,9 +127,8 @@ class JarvisRuntime(private val appContext: Context) {
      * a caller judged this worth keeping, [MemoryWriter.consider] still
      * enforces provenance/scope/dedup regardless of who's asking.
      */
-    private fun considerForMemory(content: String): String {
-        val store = sqliteMemoryStore ?: return "Memory is not available with the current context provider."
-        return runCatching {
+    private fun considerForMemory(store: SqliteContextEngine, content: String): String =
+        runCatching {
             val decision = store.memoryWriter.consider(
                 MemoryCandidate(
                     content = content,
@@ -142,19 +147,81 @@ class JarvisRuntime(private val appContext: Context) {
             Log.w(TAG, "memory write failed", it)
             "Could not store that right now."
         }
-    }
+
+    /**
+     * The `set_identity` tool's backing closure.
+     *
+     * MERGES with whatever is stored — [AgentIdentity] is a data class and a
+     * blind `saveIdentity(AgentIdentity(displayName = name))` would silently
+     * reset instructions, language and voice to their defaults. The tool
+     * contract is "null means unchanged", and that only holds if the merge
+     * happens here against the persisted value.
+     *
+     * Writes through [SqliteContextEngine.identities] — the same
+     * [com.s2s.context.local.IdentityStore] `WorkingContextBuilder` reads on
+     * every turn, so the next prompt reflects the change and so does the next
+     * session after a restart. No second identity system.
+     */
+    private fun updateIdentity(
+        store: SqliteContextEngine,
+        displayName: String?,
+        instructions: String?,
+        language: String?,
+    ): String =
+        runCatching {
+            val current = store.identities.loadIdentity() ?: AgentIdentity()
+            val updated = current.copy(
+                displayName = displayName ?: current.displayName,
+                instructions = instructions ?: current.instructions,
+                language = language ?: current.language,
+            )
+            store.identities.saveIdentity(updated)
+            Log.i(TAG, "identity updated: name=${updated.displayName} language=${updated.language}")
+            buildString {
+                append("Understood")
+                updated.displayName?.let { append(" — I'm $it now") }
+                append(".")
+            }
+        }.getOrElse {
+            Log.w(TAG, "identity write failed", it)
+            "Could not change that right now."
+        }
+
+    /** The `set_user_profile` tool's backing closure. Merges for the same reason [updateIdentity] does. */
+    private fun updateProfile(
+        store: SqliteContextEngine,
+        displayName: String?,
+        responseStyle: String?,
+        language: String?,
+    ): String =
+        runCatching {
+            val current = store.identities.loadProfile() ?: UserProfile()
+            val updated = current.copy(
+                displayName = displayName ?: current.displayName,
+                responseStyle = responseStyle ?: current.responseStyle,
+                language = language ?: current.language,
+            )
+            store.identities.saveProfile(updated)
+            Log.i(TAG, "profile updated: name=${updated.displayName} style=${updated.responseStyle}")
+            buildString {
+                append("Noted")
+                updated.displayName?.let { append(", $it") }
+                append(".")
+            }
+        }.getOrElse {
+            Log.w(TAG, "profile write failed", it)
+            "Could not save that right now."
+        }
 
     /** The `recall` tool's backing closure — searches memory for [query]. See [considerForMemory]'s doc for why this is a tool call, not automatic. */
-    private fun recallFromMemory(query: String): String {
-        val store = sqliteMemoryStore ?: return "Memory is not available with the current context provider."
-        return runCatching {
+    private fun recallFromMemory(store: SqliteContextEngine, query: String): String =
+        runCatching {
             val found = store.memories.relevant(sessionId = currentSessionId.orEmpty(), query = query, limit = 5)
             if (found.isEmpty()) "No relevant memory found for: $query" else found.joinToString("; ") { it.content }
         }.getOrElse {
             Log.w(TAG, "memory recall failed", it)
             "Could not search memory right now."
         }
-    }
 
     /** The selected normalizer plugin, or null if none is installed/enabled/selected. Never throws — normalization is optional. */
     private fun resolveNormalizer(): TextNormalizer? {
@@ -236,6 +303,27 @@ class JarvisRuntime(private val appContext: Context) {
      * those stay inside [AgentEvent]'s existing "safe metadata only" contract.
      */
     val agentEvents: SharedFlow<AgentEvent> = _agentEvents.asSharedFlow()
+
+    /**
+     * The live agent trace, survives stop/start so the last turn's records are
+     * still inspectable after the engine is torn down.
+     *
+     * Exposed because a trace nobody can read is only marginally better than
+     * NoopTracer: a settings screen or bug report reads [JarvisTracer.recent].
+     */
+    val tracer = JarvisTracer()
+
+    /**
+     * Where [FileTaskStore] keeps durable task state.
+     *
+     * `filesDir`, not `cacheDir`: cache is evictable by Android at any moment,
+     * and a task store the OS may delete under memory pressure is not durable
+     * — it would silently degrade to the in-memory behaviour this replaces.
+     * A subdirectory so the store owns its own namespace and a future
+     * `clear tasks` action can delete one directory.
+     */
+    private fun taskStoreDirectory(): File =
+        File(appContext.filesDir, TASK_STORE_DIR).apply { mkdirs() }
 
     private val agentExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "Jarvis-Agent") }
     private val agentDispatcher = agentExecutor.asCoroutineDispatcher()
@@ -350,13 +438,26 @@ class JarvisRuntime(private val appContext: Context) {
         // matches what the user said, instead of the whole catalogue. Built
         // here, after composition, because the catalogue is whatever the
         // enabled plugins contribute and is not known before that.
-        val skills = SkillRegistry().apply { registerToolSkills(composed.tools.definitions) }
+        val skills = SkillRegistry().apply {
+            registerToolSkills(composed.tools.definitions)
+            registerJarvisSkills()
+        }
+
+        // EXPLICIT production composition. Every argument below was previously
+        // left to its default, and each default silently disabled a finished
+        // subsystem: an in-memory task store (no task survived process death),
+        // NoopTracer (the entire agent lifecycle invisible), and
+        // ALWAYS_EXECUTE (no tool ever needed approval). Nothing errored,
+        // nothing worked. Read this call to know what the running agent is.
         runtime = AgentRuntime(
             e,
             composed.languageModel,
             composed.contextEngine,
             composed.tools,
-            InMemoryTaskStore(),
+            taskStore = FileTaskStore(taskStoreDirectory()),
+            budget = PRODUCTION_BUDGET,
+            confirmationPolicy = productionConfirmationPolicy,
+            tracer = tracer,
             skills = skills,
         )
         runtime.addListener { event -> _agentEvents.tryEmit(event) }
@@ -377,7 +478,56 @@ class JarvisRuntime(private val appContext: Context) {
         }
         engine = e
         e.start()
+        speakGreeting(e, composed.contextEngine)
         return Result.success(Unit)
+    }
+
+    /**
+     * Speaks one opening line, driven by stored identity.
+     *
+     * Why this exists: nothing greeted, and nothing ever asked. The app opened
+     * and waited for the user to speak first, forever, with no sign it had ever
+     * met them — which is what made a system with a full memory and identity
+     * layer still feel like a stranger every launch.
+     *
+     * Two different lines, and the difference is the point:
+     *
+     * - **No identity stored** — first run. The greeting ASKS, because that is
+     *   the only moment the question is natural, and the `set_identity` /
+     *   `set_user_profile` tools can act on the answer immediately. This is
+     *   the initialization path: one question, once, not a wizard.
+     * - **Identity stored** — greet by the name the user chose and use theirs
+     *   if known. Proof to the user, in the first second, that the thing
+     *   remembered them.
+     *
+     * Spoken through [S2SEngine.speakAssistantText], the same path an agent
+     * reply uses, so barge-in, turn adoption and the audio focus rules all
+     * behave identically — a greeting the user can talk over rather than a
+     * special case that has to finish.
+     *
+     * Never fails a start: a greeting is a courtesy, and an assistant that
+     * refuses to launch because it could not say hello is worse than a silent
+     * one.
+     */
+    private fun speakGreeting(engine: S2SEngine, contextEngine: ContextEngine) {
+        runCatching {
+            val store = contextEngine as? SqliteContextEngine ?: return
+            val identity = store.identities.loadIdentity()
+            val profile = store.identities.loadProfile()
+
+            val line = if (identity?.displayName == null && profile?.displayName == null) {
+                "Hello. I don't have a name yet — tell me what to call you, and what you'd like to call me."
+            } else {
+                buildString {
+                    append("Hello")
+                    profile?.displayName?.let { append(", ").append(it) }
+                    append(".")
+                    identity?.displayName?.let { append(" ").append(it).append(" here.") }
+                }
+            }
+            Log.i(TAG, "greeting: identity=${identity?.displayName} user=${profile?.displayName}")
+            engine.speakAssistantText(line)
+        }.onFailure { Log.w(TAG, "greeting failed — continuing without one", it) }
     }
 
     /**
@@ -439,7 +589,14 @@ class JarvisRuntime(private val appContext: Context) {
         )
         pluginManager = manager
 
-        BundledPlugins.registerAll(manager, app, ::considerForMemory, ::recallFromMemory)
+        BundledPlugins.registerAll(
+            manager,
+            app,
+            considerMemory = ::considerForMemory,
+            recallMemory = ::recallFromMemory,
+            updateIdentity = ::updateIdentity,
+            updateProfile = ::updateProfile,
+        )
 
         // Re-register anything the user previously installed. Discovery
         // alone never activates a plugin — only a plugin with a stored
@@ -453,8 +610,82 @@ class JarvisRuntime(private val appContext: Context) {
         return registry
     }
 
+    /**
+     * The production [ConfirmationPolicy].
+     *
+     * An ALLOWLIST, and that direction is the whole point. A denylist can only
+     * name risks it already knows, and this host's tool catalogue is not fixed
+     * at build time: [com.s2s.demo.plugin.BoundServiceTools] reports whatever
+     * names an installed third-party APK chooses to return. So an unknown tool
+     * has to be the case that asks, not the case that runs — otherwise every
+     * plugin ships with automatic execution by default and the safety boundary
+     * only exists for tools we thought of.
+     *
+     * The three auto-executed tools are the bundled ones, each auto-executed
+     * for a stated reason rather than because it happens to be first-party:
+     *
+     * - `calculate` — pure function of its arguments, no side effects at all.
+     * - `recall` — reads the user's own memory back to them, writes nothing.
+     * - `remember` — writes, but only to this app's own store, and being asked
+     *   "shall I remember that?" mid-conversation is worse than the write.
+     *   Reversible through the memory UI.
+     *
+     * Anything else — every external plugin tool, and any future
+     * `control_phone` — resolves to REQUIRE_CONFIRMATION. The harness then
+     * parks the task in WAITING_FOR_CONFIRMATION and waits for
+     * [AgentRuntime.resumeTask]/[AgentRuntime.rejectConfirmation], which is
+     * already implemented and persisted; nothing here needs to invent a
+     * mechanism.
+     *
+     * REJECT is intentionally unused: refusing outright removes the user's
+     * choice, and confirmation already covers the danger.
+     */
+    private val productionConfirmationPolicy = ConfirmationPolicy { toolName, _ ->
+        if (toolName in AUTO_EXECUTE_TOOLS) {
+            ConfirmationDecision.EXECUTE
+        } else {
+            ConfirmationDecision.REQUIRE_CONFIRMATION
+        }
+    }
+
     companion object Providers {
         private const val TAG = "JarvisRuntime"
+
+        /** Subdirectory of `filesDir` holding [FileTaskStore]'s durable task state. */
+        private const val TASK_STORE_DIR = "agent-tasks"
+
+        /**
+         * Side-effect-free or trivially reversible bundled tools that may run
+         * without asking. See [productionConfirmationPolicy] for why this is an
+         * allowlist and why each entry qualifies.
+         */
+        private val AUTO_EXECUTE_TOOLS = setOf("calculate", "remember", "recall")
+
+        /**
+         * Bounds on one voice turn, sized for speech rather than for a
+         * background job.
+         *
+         * The default was 8 steps / 8 tool calls / 60s. On a phone, 60 seconds
+         * of silence after someone speaks is not a slow answer — the user has
+         * concluded it is broken and said something else, which starts a new
+         * turn anyway. A generation on-device already costs seconds, so the
+         * real ceiling is patience, not compute.
+         *
+         * 4 steps is enough for the shape this harness actually runs: decide,
+         * call a tool, answer from the result, with one step spare for a
+         * retry. 2 tool calls because no bundled tool needs chaining, and a
+         * model asking for a third in one turn is looping rather than working.
+         * 25s so a stuck turn fails while the user is still listening, and the
+         * trace records which limit tripped.
+         *
+         * Raise maxToolCalls when a tool genuinely needs several steps in one
+         * turn — a device-control tool taking screenshot-then-tap would.
+         */
+        private val PRODUCTION_BUDGET = ExecutionBudget(
+            maxSteps = 4,
+            maxToolCalls = 2,
+            maxDurationMs = 25_000,
+        )
 
         /**
          * Turns a discovered external plugin into the capability contract
