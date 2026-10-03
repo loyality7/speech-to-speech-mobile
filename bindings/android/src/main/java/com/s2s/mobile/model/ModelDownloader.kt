@@ -363,14 +363,19 @@ class ModelDownloader(
                 throw IllegalStateException(errorMsg)
             }
             Log.i(TAG, "SHA256 checksum verified for ${spec.name}")
-        } else if (spec.source == ModelSource.HUGGING_FACE) {
-            // No checksum available from the Hugging Face API for this file (not an
-            // LFS object). Content-Length was already enforced above — that is the
-            // only integrity guarantee we can give for this download.
+        } else {
+            // No checksum for this file, so Content-Length (enforced above) is
+            // the only integrity guarantee. Logged for EVERY source, not just
+            // Hugging Face: the bundled registry used to pin a sha256 per
+            // model, so this branch was effectively unreachable for the
+            // built-in catalogue and the warning only ever described dynamic
+            // HF specs. Those pins are gone (see models_registry.json), which
+            // makes this the normal path — a silent weaker check would be
+            // worse than a noisy one.
             Log.w(
                 TAG,
-                "${spec.name}: no sha256 available from Hugging Face — verified by " +
-                    "byte count only ($downloadedBytes bytes), not cryptographically",
+                "${spec.name}: no sha256 to verify against — checked by byte " +
+                    "count only ($downloadedBytes bytes), not cryptographically",
             )
         }
 

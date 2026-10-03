@@ -37,6 +37,25 @@ data class ModelSpec(
      */
     val multiFileUrls: Map<String, String> = emptyMap(),
     val approxBytes: Long,
+    /**
+     * Expected SHA256, checked before the file is moved into place.
+     *
+     * Must come from the SAME source as the download, not from a literal
+     * written into the bundled registry. That distinction is a real bug, not a
+     * style preference: the registry used to pin a hash per model, upstream
+     * (sherpa-onnx release assets, in the observed case) re-uploaded the file,
+     * and the pinned value became permanently wrong — so verification failed
+     * on a perfectly good download, deleted it, and no retry could ever
+     * succeed. Measured on a real device: Moonshine Base expected
+     * a569b392daa4…, got 21870cecaa2e….
+     *
+     * `HuggingFaceDownloader` populates this from the LFS oid in the same API
+     * response that yields the download URL, which cannot go stale that way.
+     * A source with no such metadata leaves it null, and [ModelDownloader]
+     * falls back to enforcing Content-Length — weaker, logged as such, but it
+     * still catches the truncated-download case that produces unreadable
+     * crashes deep inside llama.cpp/onnxruntime.
+     */
     val sha256: String? = null,
     val version: String = "1.0",
     val backend: String? = null,

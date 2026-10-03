@@ -33,19 +33,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures {
-        // The plugin IPC contract is AIDL — the same interface file is
-        // compiled into both this app and every plugin APK.
-        aidl = true
-    }
-
     packaging {
         resources {
-            // s2s-agent/s2s-host depend on the PUBLISHED speech-to-speech-mobile
-            // artifact while this app also depends on it as a local project
-            // (project(":bindings:android")) — both bundle the same resource
-            // files. Harmless duplicate content, not a real conflict; the
-            // local module's copy wins.
             pickFirsts += "models_registry.json"
         }
     }
@@ -55,22 +44,6 @@ kotlin {
     jvmToolchain(17)
 }
 
-/**
- * Make the LOCAL engine source win over the published artifact.
- *
- * s2s-agent and s2s-host depend on `com.github.loyality7:speech-to-speech-mobile`
- * (the published AAR), while this app depends on `project(":bindings:android")`
- * — the same classes, from two sources, both on the runtime classpath. The
- * published copy was winning, which meant **every local edit to S2SEngine was
- * dead code on the device**: a turn-aggregation fix was verified by unit tests,
- * installed, and had no effect at all, because the APK ran the published 1.0.8
- * S2SEngine instead. The only visible symptom was "the fix does nothing", with
- * no error to explain it.
- *
- * Substituting the module for the project means there is exactly one copy of
- * these classes, and it is the one in this repo. Also removes the resource
- * duplication the `packaging` block above works around.
- */
 configurations.all {
     resolutionStrategy.dependencySubstitution {
         substitute(module("com.github.loyality7:speech-to-speech-mobile"))
@@ -82,41 +55,11 @@ configurations.all {
 dependencies {
     implementation(project(":bindings:android"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-
-    // sherpa ships models as .tar.bz2 and the JDK cannot read bzip2.
     implementation("org.apache.commons:commons-compress:1.26.2")
 
-    // Demo registers both llama.cpp and remote LLM backends from s2s-llm as
-    // s2s-host plugins — core itself has no concrete LanguageModel of its
-    // own. Proves the host can switch between real (not fake) providers
-    // without touching speech-to-speech-mobile or s2s-agent at all.
+    // On-device LLM backend (llama.cpp)
     implementation("com.github.loyality7.s2s-llm:llama-cpp:0.3.3")
-    implementation("com.github.loyality7.s2s-llm:remote:0.3.7")
 
-    // Same story for context — core has no concrete ContextEngine of its own.
+    // On-device SQLite conversation memory
     implementation("com.github.loyality7.s2s-context:local:0.2.2")
-
-    // Same story for tools — core defaults to NoopTools, nothing concrete.
-    // s2s-tools has only one module today, so JitPack publishes it under the
-    // plain repo-name coordinate (no ".s2s-tools" groupId suffix, no module
-    // name) rather than the multi-module convention s2s-llm/s2s-context use.
-    implementation("com.github.loyality7:s2s-tools:0.2.0")
-
-    // s2s-host: PluginRegistry/HostComposer — the composition root that
-    // replaces this app's own hardcoded LlamaLanguageModel(...)/
-    // SqliteContextEngine(...) construction. Adds availability distinction
-    // (known/available/enabled/selected/composable) to PluginDescriptor/
-    // PluginRegistry in 0.1.2.
-    //
-    // 0.1.1 briefly needed a capitalized com.github.Loyality7 coordinate due
-    // to a one-off JitPack indexing race on first publish; 0.1.2 resolved
-    // cleanly under the normal lowercase coordinate, confirming that was a
-    // transient quirk, not a persistent property of this repo.
-    implementation("com.github.loyality7:s2s-host:0.3.3")
-
-    // s2s-agent: AgentRuntime — owns the model/tool/context loop that
-    // S2SEngine deliberately does not. The demo drives voice input through
-    // this instead of S2SEngine's own single-shot generate() path (see
-    // MainActivity's use of S2SEngine's externalTurnHandler).
-    implementation("com.github.loyality7:s2s-agent:0.2.0")
 }

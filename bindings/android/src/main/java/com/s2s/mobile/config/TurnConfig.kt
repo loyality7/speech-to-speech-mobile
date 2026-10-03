@@ -58,19 +58,14 @@ data class TurnConfig(
      * two messages AND two model requests, which is both wrong and expensive.
      * Tune down only if a faster speaker finds the wait irritating.
      */
-    val baseDelayMs: Long = 2_500,
+    val baseDelayMs: Long = 1_400,
 
     /**
      * Extra wait when the transcript ends on a word that cannot end a clause —
      * "and", "to", "um", "the". Someone who stopped there is thinking, not
      * finished, so the strongest available signal says keep waiting.
-     *
-     * Sized against the same real-device measurement as [baseDelayMs]: the
-     * long observed thinking gap was 1838 ms, so base + this must clear it.
-     * With base at 2500 this allows a ~4s hunt for the next word, which is
-     * realistic for someone mid-thought who has just said "and…".
      */
-    val incompleteGraceMs: Long = 1_500,
+    val incompleteGraceMs: Long = 1_000,
 
     /**
      * How many times [incompleteGraceMs] may extend one turn.
@@ -83,11 +78,6 @@ data class TurnConfig(
 
     /**
      * Extra wait for a transcript of at most [shortUtteranceWords] words.
-     *
-     * Two words are much more likely to be the opening of a sentence than a
-     * whole turn. Short genuine utterances ("yes", "stop") do exist and pay
-     * this delay — an acceptable trade against fragmenting every sentence
-     * whose first pause lands after two words.
      */
     val shortUtteranceGraceMs: Long = 600,
 

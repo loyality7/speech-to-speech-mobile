@@ -217,8 +217,8 @@ class SingleShotGenerationTest {
     }
 
     @Test
-    fun `nothing is spoken automatically after generation completes`() = runBlocking {
-        val llm = RecordingLanguageModel("plain text or a tool call, either way")
+    fun `speech is synthesized automatically during generation`() = runBlocking {
+        val llm = RecordingLanguageModel("Hello, how can I help you today?")
         val synth = FakeSynthesizer()
         val e = engine(llm, synth)
         e.initialize().getOrThrow()
@@ -226,7 +226,7 @@ class SingleShotGenerationTest {
         e.sendText("hi")
         Thread.sleep(300)
 
-        assertTrue(synth.synthesizedTexts.isEmpty())
+        assertTrue(synth.synthesizedTexts.isNotEmpty())
     }
 
     @Test

@@ -36,16 +36,33 @@ class ModelDownloaderTest {
     }
 
     @Test
-    fun testAllRegistrySpecsHaveSha256() {
-        // Curated registry entries are all LOCAL and must carry a verified checksum —
-        // this is the guarantee issue #21 exists to protect. Dynamically-resolved
-        // HUGGING_FACE specs are allowed to lack one (see HuggingFaceDownloaderTest);
-        // that relaxation must never leak into the curated registry.
+    fun testNoRegistrySpecPinsAHardcodedSha256() {
+        // The INVERSE of what this test used to assert, because the old rule was
+        // the bug. It required every curated spec to carry a checksum, which in
+        // practice meant a 64-hex literal written into models_registry.json.
+        //
+        // A literal cannot stay correct. Upstream re-uploads the file — a
+        // rebuilt sherpa-onnx release asset, in the case that was observed —
+        // and the pin is then permanently wrong: verification fails on a
+        // perfectly good download, deletes it, and no number of retries can
+        // ever succeed, because every retry fetches the same current file and
+        // compares it to the same frozen expectation. Measured on a real
+        // device: Moonshine Base expected a569b392daa4…, got 21870cecaa2e…,
+        // and that model became impossible to install.
+        //
+        // A checksum is still verified whenever one is available — but it must
+        // come from the same response as the download (HuggingFaceDownloader
+        // reads the LFS oid), never from a constant checked into this repo.
         val models = ModelRegistry.ALL_MODELS
         assertTrue(models.isNotEmpty())
         for (spec in models) {
             assertEquals("Model ${spec.id} should be sourced LOCAL", ModelSource.LOCAL, spec.source)
-            assertTrue("Model ${spec.id} missing sha256 checksum", !spec.sha256.isNullOrBlank())
+            assertTrue(
+                "Model ${spec.id} pins a hardcoded sha256. It will break the moment upstream " +
+                    "re-uploads the file. Let HuggingFaceDownloader supply the hash from the " +
+                    "same API response as the URL, or leave it null and rely on Content-Length.",
+                spec.sha256.isNullOrBlank(),
+            )
         }
     }
 

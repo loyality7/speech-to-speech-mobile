@@ -891,13 +891,8 @@ class S2SEngine @JvmOverloads constructor(
     }
 
     /**
-     * Exactly one [LanguageModel.generate] call, start to finish. The engine
-     * does not inspect the completed text to decide whether it is a tool
-     * call — it has no opinion on that. Whatever the model produced is
-     * recorded via [ContextEngine.addAssistant] and reported via
-     * [S2SEvent.AssistantDone] unconditionally; nothing is spoken from here.
-     * An external caller (e.g. an agent harness) decides what the text means
-     * and, if it is a final answer, hands it to [speakAssistantText].
+     * Executes [LanguageModel.generate] and streams tokens directly to the
+     * sentence chunker and TTS synthesiser for low-latency concurrent playback.
      */
     private fun generate(turn: Int, overrides: GenerationOverrides? = null) {
         if (turns.isStale(turn)) return
@@ -914,37 +909,20 @@ class S2SEngine @JvmOverloads constructor(
                         reply.append(text)
                         partialReply = reply.toString()
                         emit(S2SEvent.AssistantDelta(text))
+                        chunker.accept(text).forEach { speak(turn, it) }
                     }
 
                     override fun onComplete() {
                         if (turns.isStale(turn)) return
                         val full = reply.toString()
 
-                        // The model's output — tool-call-shaped or not — is
-                        // already in whatever KV cache the backend keeps, so
-                        // history must describe the same conversation or the
-                        // next turn's cache anchor points at text that appears
-                        // nowhere in the prompt.
                         if (full.isNotBlank()) {
                             history.addAssistant(full)
                             emit(S2SEvent.AssistantDone(full))
                         }
-                        // Committed above (or was blank and never will be): clear
-                        // it so a barge-in that lands later, while this turn's
-                        // audio is still finishing playback, does not read this
-                        // stale value and commit the same reply to history a
-                        // second time via commitOrDropPendingTurn().
                         partialReply = ""
-                        // No speech was queued from this path — nothing for
-                        // markSynthesisDone's "wait for the TTS worker" to wait
-                        // for, so return to LISTENING directly. A later
-                        // speakAssistantText() call moves the state forward
-                        // again on its own, same as a fresh turn would.
-                        synthesisDone = true
-                        if (running && _state.value == S2SState.THINKING) {
-                            resetRecognitionPending = true
-                            setState(S2SState.LISTENING)
-                        }
+                        chunker.flush()?.let { speak(turn, it) }
+                        markSynthesisDone(turn)
                     }
 
                     override fun onError(message: String, cause: Throwable?) {

@@ -20,30 +20,36 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
-import com.s2s.demo.plugin.BundledPlugins
+import com.s2s.context.local.SqliteContextEngine
+import com.s2s.llm.local.LlamaConfig
+import com.s2s.llm.local.LlamaLanguageModel
 import com.s2s.mobile.S2SEngine
 import com.s2s.mobile.S2SEvent
 import com.s2s.mobile.config.ModelConfigFactory
-import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.DownloadState
 import com.s2s.mobile.model.HuggingFaceDownloader
+import com.s2s.mobile.model.ModelDownloads
 import com.s2s.mobile.model.ModelProgress
 import com.s2s.mobile.model.ModelRegistry
-import com.s2s.mobile.model.S2SModels
 import com.s2s.mobile.model.ModelSource
 import com.s2s.mobile.model.ModelSpec
+import com.s2s.mobile.model.S2SModels
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
- * Harness for the S2S SDK featuring background downloading via Foreground Service,
- * interactive model selection across all categories, and direct navigation to
- * dedicated standalone TTS & STT testing screens.
+ * Demo app showcasing a pure on-device Speech-to-Speech (S2S) pipeline.
+ *
+ * Features:
+ * - VAD -> STT -> LLM -> TTS on-device pipeline with streaming audio/text
+ * - Interactive model selection across VAD, STT, TTS, and LLM
+ * - Direct Hugging Face model repository browsing and downloading
+ * - Standalone TTS & STT testing screens
+ * - Natural barge-in interruption and sentence-level turn aggregation
  */
 class MainActivity : Activity() {
 
@@ -73,7 +79,6 @@ class MainActivity : Activity() {
     private val downloads by lazy { ModelDownloads(this) }
     private var isDownloading = false
 
-    private val jarvis by lazy { com.s2s.demo.plugin.JarvisRuntimeHolder.get(applicationContext) }
     private var engine: S2SEngine? = null
     private var running = false
     private var partialShown = false
@@ -81,10 +86,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Wrapped in a ScrollView: the screen carries model spinners, the
-        // LLM provider settings and the transcript, which together exceed a
-        // phone's height — without this the Save button below the fold was
-        // simply unreachable.
         setContentView(ScrollView(this).apply { addView(buildUi()) })
 
         val reqs = mutableListOf(Manifest.permission.RECORD_AUDIO)
@@ -174,32 +175,13 @@ class MainActivity : Activity() {
 
         openTtsTestBtn = Button(this).apply { text = "🔊 Test TTS Voice" }
         openSttTestBtn = Button(this).apply { text = "🎙️ Test STT Model" }
-        val openAgentTestBtn = Button(this).apply { text = "🧪 Test Agent Tools" }
-        openAgentTestBtn.setOnClickListener {
-            // llama.cpp is process-global — only one LlamaLanguageModel may be
-            // initialized at a time (LlamaLanguageModel's own documented
-            // constraint). AgentChatTestActivity loads its own model
-            // instance, so it can't run alongside this Activity's engine.
-            if (running) {
-                status.text = "Stop the engine first — the tool tester loads its own model and llama.cpp only allows one active at a time."
-            } else {
-                startActivity(Intent(this, AgentChatTestActivity::class.java))
-            }
-        }
-
-        val openPluginsBtn = Button(this).apply { text = "🧩 Plugins" }
-        openPluginsBtn.setOnClickListener {
-            startActivity(Intent(this, PluginsActivity::class.java))
-        }
 
         val navParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
-            marginStart = 2
-            marginEnd = 2
+            marginStart = 4
+            marginEnd = 4
         }
         navRow.addView(openTtsTestBtn, navParams)
         navRow.addView(openSttTestBtn, navParams)
-        navRow.addView(openAgentTestBtn, navParams)
-        navRow.addView(openPluginsBtn, navParams)
         root.addView(navRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         root.addView(label("Hugging Face Token (for gated repos, e.g. Gemma):", padTop = 4))
@@ -253,7 +235,6 @@ class MainActivity : Activity() {
         hfBrowseButtons = browseButtons
 
         root.addView(selectionBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        root.addView(buildLlmProviderBox(), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         status = TextView(this).apply {
             textSize = 14f
@@ -286,11 +267,6 @@ class MainActivity : Activity() {
             textSize = 15f
             movementMethod = ScrollingMovementMethod()
         }
-        // No nested ScrollView and no weighted height: the whole screen now
-        // scrolls (see buildUi's caller), and a scrollable child inside a
-        // scrollable parent fights for drag gestures. WRAP_CONTENT lets the
-        // transcript grow and the page scroll to it — with a weight of 1
-        // inside a ScrollView it would have collapsed to nothing.
         root.addView(
             transcript,
             LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = 12 },
@@ -298,137 +274,10 @@ class MainActivity : Activity() {
         return root
     }
 
-    // Mutable per-category option lists. Start as the curated registry; a Hugging
-    // Face pick is appended here (see addAndSelect) so it actually shows up in the
-    // spinner instead of only living in selectedXxx — otherwise it's invisible in
-    // the dropdown, and touching the spinner again would silently discard it.
     private val vadOptions = ModelRegistry.ALL_VAD_OPTIONS.toMutableList()
     private val sttOptions = ModelRegistry.ALL_STT_OPTIONS.toMutableList()
     private val ttsOptions = ModelRegistry.ALL_TTS_OPTIONS.toMutableList()
     private val llmOptions = ModelRegistry.ALL_LLM_OPTIONS.toMutableList()
-
-    /**
-     * Chooses which LLM *provider* answers — on-device or a remote
-     * endpoint — as distinct from the "LLM Model" spinner above, which only
-     * picks which GGUF file the on-device provider loads.
-     *
-     * Worth surfacing here rather than leaving in the Plugins screen: the
-     * on-device model's speed depends heavily on the phone, so "this is too
-     * slow, use my server instead" is a decision made while testing voice,
-     * not while managing plugins.
-     *
-     * Switching providers changes nothing else. `AgentRuntime` receives a
-     * `LanguageModel` and has no idea which plugin produced it, so tools
-     * and conversation memory keep working exactly the same either way —
-     * that separation is the whole point of the plugin/composition layer.
-     */
-    private fun buildLlmProviderBox(): LinearLayout {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 16, 0, 8)
-        }
-
-        box.addView(label("Answering with:"))
-
-        val providerSpinner = Spinner(this)
-        val providers = listOf(
-            BundledPlugins.LLAMA_CPP to "On-device (llama.cpp)",
-            BundledPlugins.REMOTE_LLM to "Remote server (OpenAI-compatible)",
-        )
-        providerSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            providers.map { it.second },
-        )
-
-        val remoteBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        // Pre-filled with BundledPlugins' actual default, not blank — the
-        // provider applies this same fallback if the field is left empty,
-        // so showing an empty box here was a lie about what the app would
-        // actually connect to. Still a real, editable EditText: typing over
-        // it and saving stores the user's own value, same as before.
-        val urlInput = EditText(this).apply {
-            hint = "https://your-server/v1"
-            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["baseUrl"]?.takeIf { it.isNotBlank() } ?: BundledPlugins.OPENROUTER_DEFAULT_BASE_URL)
-        }
-        val keyInput = EditText(this).apply {
-            hint = "API key (required for OpenRouter — openrouter.ai/keys)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["apiKey"].orEmpty())
-        }
-        val modelInput = EditText(this).apply {
-            hint = "Model name (optional, e.g. gpt-4o-mini)"
-            setText(jarvis.registry.getConfig(BundledPlugins.REMOTE_LLM)["model"]?.takeIf { it.isNotBlank() } ?: BundledPlugins.OPENROUTER_DEFAULT_MODEL)
-        }
-        val saveRemoteBtn = Button(this).apply { text = "Save server settings" }
-        saveRemoteBtn.setOnClickListener {
-            val url = urlInput.text.toString().trim()
-            if (url.isEmpty()) {
-                status.text = "Enter a server URL first."
-                return@setOnClickListener
-            }
-            jarvis.pluginManager.configure(
-                BundledPlugins.REMOTE_LLM,
-                com.s2s.host.core.PluginConfig(
-                    buildMap {
-                        put("baseUrl", url)
-                        keyInput.text.toString().trim().takeIf { it.isNotEmpty() }?.let { put("apiKey", it) }
-                        // Blank means "let the server pick" — storing an
-                        // empty string would send an empty model name and
-                        // most servers reject that.
-                        modelInput.text.toString().trim().takeIf { it.isNotEmpty() }?.let { put("model", it) }
-                    },
-                ),
-            )
-            status.text = "Server settings saved. Restart the engine to use them."
-        }
-        remoteBox.addView(label("Server URL:", padTop = 4))
-        remoteBox.addView(urlInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        remoteBox.addView(keyInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        remoteBox.addView(modelInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        remoteBox.addView(saveRemoteBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-
-        // Reflect what is actually selected rather than assuming a default —
-        // the selection is persisted, so it survives restarts and may
-        // already be remote.
-        val current = jarvis.registry.getSelected(com.s2s.host.core.PluginType.LANGUAGE_MODEL)
-        providers.indexOfFirst { it.first == current }.takeIf { it >= 0 }?.let { providerSpinner.setSelection(it) }
-        remoteBox.visibility = if (current == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
-
-        // Android fires onItemSelected once when the listener is attached,
-        // with the spinner's current position. Acting on that would call
-        // select() during layout and could silently switch the user's
-        // provider to whatever happened to be at index 0 — so the first
-        // callback is treated as "restoring what is already selected", not
-        // as a choice.
-        var ignoreFirstCallback = true
-
-        providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val (pluginId, label) = providers[position]
-                if (ignoreFirstCallback) {
-                    ignoreFirstCallback = false
-                    remoteBox.visibility = if (pluginId == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
-                    return
-                }
-                jarvis.pluginManager.select(pluginId, com.s2s.host.core.PluginType.LANGUAGE_MODEL)
-                remoteBox.visibility = if (pluginId == BundledPlugins.REMOTE_LLM) View.VISIBLE else View.GONE
-                // Deliberately does not restart a running engine: swapping
-                // the model under an in-flight turn would abandon it
-                // mid-sentence. Applying on next start is the predictable
-                // behaviour.
-                if (running) status.text = "$label selected — restart the engine to apply."
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        box.addView(providerSpinner, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        box.addView(remoteBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        return box
-    }
 
     private fun setupSpinners() {
         bindSpinner(vadSpinner, vadOptions) { selectedVad = it }
@@ -452,12 +301,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Appends a dynamically-resolved spec (Hugging Face pick) to a category's
-     * option list, refreshes that spinner, and selects the new entry. Persisted to
-     * SharedPreferences so the pick survives process death — otherwise a Hugging
-     * Face model you already downloaded vanishes from the dropdown on next launch
-     * and you'd have to re-search for it (the files themselves stay on disk either
-     * way; this is only about the SDK remembering which one you picked). */
     private fun addAndSelect(spinner: Spinner, options: MutableList<ModelSpec>, spec: ModelSpec) {
         options.removeAll { it.id == spec.id }
         options.add(spec)
@@ -486,9 +329,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Re-applies whatever custom model was picked last session, per category. Must
-     * run after setupSpinners() — addAndSelect needs the listener already bound so
-     * selecting the restored entry actually updates selectedXxx. */
     private fun restorePersistedCustomModels() {
         loadPersistedCustomModel("VAD")?.let { addAndSelect(vadSpinner, vadOptions, it) }
         loadPersistedCustomModel("STT")?.let { addAndSelect(sttSpinner, sttOptions, it) }
@@ -499,17 +339,14 @@ class MainActivity : Activity() {
     private fun onModelSelectionChanged() {
         updateStatus()
         if (running) {
-            // Must release, not stop: onToggle builds a whole new engine, and the
-            // old one holds the process-global llama.cpp runtime until released.
             releaseEngine()
             toggle.text = "Start Engine"
             onToggle()
         }
     }
 
-    /** Frees the current engine's models and the agent's dispatch thread — a stopped-but-unreleased runtime still owns both. */
     private fun releaseEngine() {
-        jarvis.stop()
+        engine?.release()
         engine = null
         running = false
     }
@@ -586,12 +423,6 @@ class MainActivity : Activity() {
         status.text = "Selected $category: ${spec.name} (${files.size} files, no sha256 — byte-count check only)"
     }
 
-    /**
-     * Resolves a repo+filename picked in [HuggingFaceBrowserActivity] into a
-     * [ModelSpec] and selects it for the matching stage. Pulls the file's size and
-     * (when the file is an LFS object) sha256 from the repo listing so the resulting
-     * spec gets the same hard-fail integrity check as a curated registry entry.
-     */
     private fun resolveHuggingFaceSelection(repo: String, filename: String, category: String) {
         hfBrowseButtons.forEach { it.isEnabled = false }
         status.text = "Resolving $filename from $repo…"
@@ -691,39 +522,46 @@ class MainActivity : Activity() {
                 selectedTts,
                 selectedLlm,
             )
-            // No withContext here: JarvisRuntime.start() suspends onto
-            // S2SEngine.initialize()'s own Dispatchers.IO internally.
-            // Composition goes through s2s-host's PluginRegistry/HostComposer
-            // rather than constructing LlamaLanguageModel/SqliteContextEngine
-            // directly — see JarvisRuntime for what's registered, why, and
-            // how the speech<->agent thread boundary is owned.
             val sessionId = java.util.UUID.randomUUID().toString()
-            // Keep the failure reason, not just a boolean: start() reports
-            // actionable problems ("Remote needs Server URL"), and throwing
-            // that away left the user with "check logcat" for something they
-            // could have fixed in two taps.
             var failureMessage: String? = null
-            val started = try {
-                jarvis.start(
-                    config,
-                    llmConfig = mapOf("modelPath" to config.models.llmModel),
-                    contextConfig = mapOf("sessionId" to sessionId),
-                ).onFailure { failureMessage = it.message }.isSuccess
-            } catch (ex: Throwable) {
-                Log.e("MainActivity", "Engine init failed", ex)
-                failureMessage = ex.message
-                false
+            val loaded = withContext(Dispatchers.IO) {
+                try {
+                    val llm = LlamaLanguageModel(LlamaConfig(maxTokens = 512), config.models.llmModel)
+                    val history = SqliteContextEngine(
+                        this@MainActivity,
+                        sessionId,
+                        "You are a helpful speech-to-speech voice assistant. Keep answers concise, clear, and natural for speech.",
+                    )
+                    val e = S2SEngine(
+                        context = applicationContext,
+                        config = config,
+                        languageModel = llm,
+                        history = history,
+                        sessionId = sessionId,
+                    )
+                    val initResult = e.initialize()
+                    if (initResult.isSuccess) {
+                        e.start()
+                        e
+                    } else {
+                        failureMessage = initResult.exceptionOrNull()?.message ?: "S2SEngine.initialize() failed"
+                        null
+                    }
+                } catch (ex: Throwable) {
+                    Log.e("MainActivity", "Engine init failed", ex)
+                    failureMessage = ex.message
+                    null
+                }
             }
-            val loaded = if (started) jarvis.engine else null
 
             toggle.isEnabled = true
             if (loaded != null) {
                 engine = loaded
                 collectEvents(loaded)
-                collectAgentEvents()
                 running = true
                 toggle.text = "Stop Engine"
                 updateVoicesList()
+                status.text = "Engine running — listening…"
             } else {
                 status.text = failureMessage ?: "Failed to initialize pipeline (check logcat S2S*)"
             }
@@ -748,44 +586,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /**
-     * Renders the assistant's final text, per-turn — `S2SEngine.speakAssistantText()`
-     * (the agent path's only route to TTS) never emits `AssistantDelta`/
-     * `AssistantDone`, so without this the transcript showed every user
-     * utterance but never Jarvis's reply, even though it was audibly spoken.
-     * Observes [JarvisRuntime.agentEvents] only — never touches `AgentRuntime`
-     * itself, matching the same event-boundary [collectEvents] already uses
-     * for the speech layer.
-     */
-    private fun collectAgentEvents() {
-        scope.launch {
-            jarvis.agentEvents.collect { event ->
-                when (event) {
-                    is com.s2s.agent.agent.AgentEvent.TaskCompleted ->
-                        transcript.append("Jarvis: ${event.response}\n\n")
-                    is com.s2s.agent.agent.AgentEvent.TaskFailed ->
-                        transcript.append("Jarvis: [error] ${event.message}\n\n")
-                    else -> Unit
-                }
-            }
-        }
-    }
-
     private fun collectEvents(engine: S2SEngine) {
         scope.launch {
             engine.events.collect { event ->
                 when (event) {
-                    // ONE evolving message per turn. Every non-final update
-                    // overwrites the same "You:" line in place; the single
-                    // final one commits it. The engine guarantees exactly one
-                    // isFinal=true per conversational turn (see
-                    // TurnAggregator) — it used to send one per acoustic
-                    // segment, which is why a sentence with two thinking
-                    // pauses used to appear as three separate messages.
-                    //
-                    // Updates arrive per closed VAD segment, not per word:
-                    // the default offline recogniser emits no partials, so
-                    // continuous speech shows nothing until the first pause.
                     is S2SEvent.UserTranscript ->
                         if (event.isFinal) {
                             replacePartial("You: ${event.text}\n")
@@ -805,13 +609,11 @@ class MainActivity : Activity() {
                         status.text = "TTFT: ${event.metrics.timeToFirstTokenMs}ms · " +
                             "TTFA: ${event.metrics.timeToFirstAudioMs}ms"
 
-                    is S2SEvent.ToolExecuted -> transcript.append("[tool ${event.name}] ${event.output}\n")
+                    is S2SEvent.ToolExecuted -> Unit
 
                     is S2SEvent.AudioFocusLost -> if (event.willResume) {
                         status.text = "Paused — something else is using the audio"
                     } else {
-                        // The engine has already stopped itself, so the button has
-                        // to follow or it lies about the state.
                         status.text = "Stopped — audio focus lost"
                         running = false
                         toggle.text = "Start Engine"
@@ -843,9 +645,7 @@ class MainActivity : Activity() {
         super.onDestroy()
         downloads.close()
         scope.cancel()
-        jarvis.shutdown()
-        engine = null
-        running = false
+        releaseEngine()
     }
 
     private companion object {
